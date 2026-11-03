@@ -1,0 +1,29 @@
+# Integration tests (Testcontainers provides the datasource and Kafka; user, restaurant and catalog services are mocked).
+spring:
+  kafka:
+    properties:
+      # In-memory Schema Registry, shared by every serializer and deserializer in the test JVM.
+      schema.registry.url: mock://order-service-tests
+
+app:
+  outbox:
+    poll-interval: 200ms
+  # Tests run the expiry job themselves, with a short timeout
+  unpaid-orders:
+    expiry-enabled: false
+    expire-after: 1s
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP and Kafka headers, and outbox rows), which the tests rely on.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

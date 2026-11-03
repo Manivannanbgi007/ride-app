@@ -1,0 +1,32 @@
+# Integration tests: Testcontainers provides Elasticsearch and Kafka; the events are published by the tests.
+spring:
+  kafka:
+    properties:
+      # In-memory Schema Registry, shared by every serializer and deserializer in the test JVM.
+      schema.registry.url: mock://search-service-tests
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP and Kafka headers, and outbox rows), which the tests rely on.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# review-service is never called in tests: the rating feed is a local stub on this port (see ReviewServiceStub), and the
+# scheduled sync stays quiet so that tests start it themselves.
+app:
+  review:
+    base-url: http://localhost:18094
+    connect-timeout: 1s
+    read-timeout: 3s
+  rating-sync:
+    initial-delay: 1h
+    interval: 1h
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

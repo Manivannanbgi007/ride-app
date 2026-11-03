@@ -1,0 +1,655 @@
+{
+    "uid":  "fd-business",
+    "title":  "Food Delivery - Business",
+    "description":  "Orders, payments and deliveries",
+    "tags":  [
+                 "food-delivery"
+             ],
+    "schemaVersion":  39,
+    "version":  1,
+    "editable":  true,
+    "graphTooltip":  1,
+    "time":  {
+                 "to":  "now",
+                 "from":  "now-1h"
+             },
+    "refresh":  "30s",
+    "templating":  {
+                       "list":  [
+
+                                ]
+                   },
+    "panels":  [
+                   {
+                       "type":  "row",
+                       "title":  "Today",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  0,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Orders placed (24 h)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "round(sum(increase(orders_placed_total[24h]))) or vector(0)",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Orders per minute",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  4
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "(sum(rate(orders_placed_total[5m])) * 60) or vector(0)",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Delivered (24 h)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  8
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "round(sum(increase(orders_status_changes_total{status=\"DELIVERED\"}[24h]))) or vector(0)",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Cancelled or rejected (24 h)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "round(sum(increase(orders_status_changes_total{status=~\"CANCELLED|REJECTED\"}[24h]))) or vector(0)",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Payment failures (1 h)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  16
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "(sum(increase(payments_completed_total{outcome=\"failed\"}[1h])) or vector(0)) / sum(increase(payments_completed_total[1h]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "percentunit"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "Share of online payments that failed"
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Delivery time p95 (24 h)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  20
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "histogram_quantile(0.95, sum by (le) (rate(deliveries_duration_seconds_bucket[24h])))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "s"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "From food ready to delivered"
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "Orders",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  5,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Orders per minute by payment method",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  6,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{payment_method}}",
+                                           "expr":  "sum by (payment_method) (rate(orders_placed_total[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Order outcomes per minute",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  6,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{status}}",
+                                           "expr":  "sum by (status) (rate(orders_status_changes_total{status=~\"DELIVERED|CANCELLED|REJECTED\"}[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "Payments",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  14,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Payments per minute by outcome and method",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  15,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{method}} {{outcome}}",
+                                           "expr":  "sum by (outcome, method) (rate(payments_completed_total[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Refunds per minute",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  15,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{outcome}}",
+                                           "expr":  "sum by (outcome) (rate(refunds_completed_total[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "Deliveries",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  23,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Delivery time (median, p95)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  24,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "median",
+                                           "expr":  "histogram_quantile(0.5, sum by (le) (rate(deliveries_duration_seconds_bucket[30m])))",
+                                           "refId":  "A"
+                                       },
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "p95",
+                                           "expr":  "histogram_quantile(0.95, sum by (le) (rate(deliveries_duration_seconds_bucket[30m])))",
+                                           "refId":  "B"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "s"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Deliveries per minute",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  24,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{outcome}}",
+                                           "expr":  "sum by (outcome) (rate(deliveries_completed_total[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   }
+               ]
+}

@@ -1,0 +1,76 @@
+### Food Delivery Platform - API Gateway
+### Run with the VS Code "REST Client" extension or the IntelliJ HTTP Client.
+### Start the gateway first:  .\mvnw.cmd spring-boot:run
+
+@gateway = http://localhost:8080
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+# The access token of step 0 (valid 15 minutes: sign in again after that)
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+
+### 0. Admin login (needs user-service) -> adminToken, for the routes and the admin calls below
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 1. Gateway health (expect: {"status":"UP"})
+GET {{gateway}}/actuator/health
+
+### 2. Application info
+GET {{gateway}}/actuator/info
+
+### 3. All configured routes (path -> microservice): administrators only (401 without a token, 403 for another role)
+GET {{gateway}}/actuator/gateway/routes
+Authorization: Bearer {{adminToken}}
+
+### 4. Request id is generated: check the X-Request-Id response header
+GET {{gateway}}/actuator/health
+
+### 5. Your own request id is kept and forwarded to the service
+GET {{gateway}}/actuator/health
+X-Request-Id: my-test-request-001
+
+### 6. Path without a route (expect: 404)
+GET {{gateway}}/api/v1/unknown
+
+### ---------------------------------------------------------------------------
+### Routed calls. They return 5xx until the target service exists and is running.
+### ---------------------------------------------------------------------------
+
+### user-service (Phase 2)
+GET {{gateway}}/api/v1/admin/users?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### restaurant-service (Phase 3)
+GET {{gateway}}/api/v1/restaurants
+
+### catalog-service (Phase 4)
+GET {{gateway}}/api/v1/categories
+
+### order-service (Phase 5)
+GET {{gateway}}/api/v1/admin/orders?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### payment-service (Phase 6)
+GET {{gateway}}/api/v1/admin/payments?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### delivery-service (Phase 10), search-service (Phase 11)
+GET {{gateway}}/api/v1/search/restaurants?q=biryani
+
+### ---------------------------------------------------------------------------
+### Rate limiting (Phase 12): Redis token buckets per signed-in user (per client IP for a visitor). Responses carry X-RateLimit-* headers.
+### Every route: 20 requests/second (bursts up to 40). Login and registration: 10 per minute
+### (120 in docker-compose, so the test scripts can sign up many users). Over the limit: 429 Too Many Requests.
+### Send this one repeatedly and watch X-RateLimit-Remaining drop, then the 429.
+### ---------------------------------------------------------------------------
+
+### Login budget
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "nobody@example.com", "password": "wrong-password" }
+
+### The buckets in Redis (direct): docker exec -it fd-redis redis-cli --scan --pattern "request_rate_limiter*"

@@ -1,0 +1,230 @@
+package com.fooddelivery.chatservice.service;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Consumer;
+
+import com.fooddelivery.chatservice.client.PresenceLookup;
+import com.fooddelivery.chatservice.client.UserInfo;
+import com.fooddelivery.chatservice.client.UserLookup;
+import com.fooddelivery.chatservice.dto.request.OpenConversationRequest;
+import com.fooddelivery.chatservice.dto.request.SendMessageRequest;
+import com.fooddelivery.chatservice.dto.response.ConversationResponse;
+import com.fooddelivery.chatservice.dto.response.MessagePageResponse;
+import com.fooddelivery.chatservice.dto.response.OpenedConversation;
+import com.fooddelivery.chatservice.dto.response.PageResponse;
+import com.fooddelivery.chatservice.dto.response.SentMessage;
+import com.fooddelivery.chatservice.dto.response.UnreadCountResponse;
+import com.fooddelivery.chatservice.entity.Conversation;
+import com.fooddelivery.chatservice.entity.Role;
+import com.fooddelivery.chatservice.entity.StaffConversationSettings;
+import com.fooddelivery.chatservice.entity.StaffConversationSettingsId;
+import com.fooddelivery.chatservice.exception.DependencyUnavailableException;
+import com.fooddelivery.chatservice.exception.ResourceNotFoundException;
+import com.fooddelivery.chatservice.mapper.ChatMapper;
+import com.fooddelivery.chatservice.repository.ConversationRepository;
+import com.fooddelivery.chatservice.repository.ConversationRow;
+import com.fooddelivery.chatservice.repository.StaffConversationSettingsRepository;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * The support team's side (PLATFORM_ADMIN): one inbox shared by all admins. Any admin may read and answer any
+ * conversation; pin and mute are each admin's own. Reading a conversation clears its unread counter for every
+ * admin: the team answers as one, so a chat one admin has seen is not "new" for the others.
+ * <p>
+ * Other services are asked outside the database transactions (user-service for an admin's name, notification-service
+ * for presence), so no connection waits on them.
+ */
+@Slf4j
+@Service
+public class StaffChatService {
+
+    /** What an admin's messages are signed with when user-service cannot tell his name. */
+    static final String FALLBACK_STAFF_NAME = "Support";
+
+    private final ConversationRepository conversationRepository;
+    private final StaffConversationSettingsRepository settingsRepository;
+    private final MessageReader messageReader;
+    private final ChatMessageWriter messageWriter;
+    private final UserLookup userLookup;
+    private final PresenceLookup presenceLookup;
+    private final ChatMapper chatMapper;
+    private final Clock clock;
+    private final TransactionTemplate writeTransaction;
+
+    public StaffChatService(ConversationRepository conversationRepository,
+                            StaffConversationSettingsRepository settingsRepository, MessageReader messageReader,
+                            ChatMessageWriter messageWriter, UserLookup userLookup, PresenceLookup presenceLookup,
+                            ChatMapper chatMapper, Clock clock, PlatformTransactionManager transactionManager) {
+        this.conversationRepository = conversationRepository;
+        this.settingsRepository = settingsRepository;
+        this.messageReader = messageReader;
+        this.messageWriter = messageWriter;
+        this.userLookup = userLookup;
+        this.presenceLookup = presenceLookup;
+        this.chatMapper = chatMapper;
+        this.clock = clock;
+        this.writeTransaction = new TransactionTemplate(transactionManager);
+    }
+
+    /** The inbox: the caller's pinned conversations first, then the most recently active ones. */
+    public PageResponse<ConversationResponse> list(Long staffUserId, String search, int page, int size) {
+        Page<ConversationRow> rows = conversationRepository.findInbox(staffUserId, ChatRules.containsPattern(search),
+                PageRequest.of(page, size));
+        // One presence call for the whole page; unknown (null) when notification-service does not answer
+        Optional<Set<Long>> online = presenceLookup.findOnline(
+                rows.stream().map(row -> row.conversation().getParticipantUserId()).toList());
+        return PageResponse.from(rows.map(row -> chatMapper.toStaffResponse(row.conversation(), row.pinned(),
+                row.muted(), onlineOf(online, row.conversation()))));
+    }
+
+    public ConversationResponse get(Long staffUserId, Long conversationId) {
+        ConversationRow row = findRow(staffUserId, conversationId);
+        Optional<Set<Long>> online = presenceLookup.findOnline(List.of(row.conversation().getParticipantUserId()));
+        return chatMapper.toStaffResponse(row.conversation(), row.pinned(), row.muted(),
+                onlineOf(online, row.conversation()));
+    }
+
+    /**
+     * Starts the conversation with a user, or returns the one that exists (so an admin can always "open chat").
+     * Presence is not asked here: the answer is "unknown" and the inbox list fills it in.
+     */
+    public OpenedConversation open(Long staffUserId, OpenConversationRequest request) {
+        Long userId = request.userId();
+        Optional<Conversation> existing = conversationRepository.findByParticipantUserId(userId);
+        if (existing.isPresent()) {
+            return opened(staffUserId, existing.get(), false);
+        }
+
+        UserInfo user = userLookup.findUser(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
+        ChatRules.checkCanBeParticipant(user);
+
+        try {
+            return openOnce(staffUserId, user);
+        } catch (DataIntegrityViolationException e) {
+            // Two admins (or a double click) opened it at the same moment: the other one won, so this is a "get"
+            return openOnce(staffUserId, user);
+        }
+    }
+
+    private OpenedConversation openOnce(Long staffUserId, UserInfo user) {
+        boolean[] created = {false};
+        Conversation conversation = writeTransaction.execute(status -> conversationRepository
+                .lockByParticipantUserId(user.id())
+                .orElseGet(() -> {
+                    created[0] = true;
+                    Instant now = Instant.now(clock).truncatedTo(ChronoUnit.MICROS);
+                    return conversationRepository.save(new Conversation(user.id(), ChatRules.fitName(user.fullName()),
+                            user.role(), now));
+                }));
+        return opened(staffUserId, conversation, created[0]);
+    }
+
+    private OpenedConversation opened(Long staffUserId, Conversation conversation, boolean created) {
+        ConversationRow row = findRow(staffUserId, conversation.getId());
+        return new OpenedConversation(
+                chatMapper.toStaffResponse(row.conversation(), row.pinned(), row.muted(), null), created);
+    }
+
+    public MessagePageResponse messages(Long conversationId, Long beforeId, int limit, String search) {
+        if (!conversationRepository.existsById(conversationId)) {
+            throw notFound(conversationId);
+        }
+        return messageReader.page(conversationId, beforeId, limit, search);
+    }
+
+    /** The reply is signed with the admin's own name; "Support" when user-service cannot tell it. */
+    public SentMessage send(Long staffUserId, Long conversationId, SendMessageRequest request) {
+        String staffName = staffName(staffUserId);
+        SentMessage sent;
+        try {
+            sent = sendOnce(staffUserId, staffName, conversationId, request);
+        } catch (DataIntegrityViolationException e) {
+            // The same clientMessageId arrived twice at once: a second pass answers as a repeat
+            sent = sendOnce(staffUserId, staffName, conversationId, request);
+        }
+        if (sent.created()) {
+            log.info("Staff message {} saved in conversation {}", sent.message().id(), conversationId);
+        }
+        return sent;
+    }
+
+    private SentMessage sendOnce(Long staffUserId, String staffName, Long conversationId,
+                                 SendMessageRequest request) {
+        return writeTransaction.execute(status -> {
+            Conversation conversation = conversationRepository.lockById(conversationId)
+                    .orElseThrow(() -> notFound(conversationId));
+            return messageWriter.append(conversation, request,
+                    new ChatMessageWriter.Sender(staffUserId, staffName, Role.PLATFORM_ADMIN.name(), true));
+        });
+    }
+
+    /** Any admin opening a conversation clears it for all admins (see the class comment). */
+    public void markRead(Long conversationId) {
+        writeTransaction.executeWithoutResult(status -> {
+            Conversation conversation = conversationRepository.lockById(conversationId)
+                    .orElseThrow(() -> notFound(conversationId));
+            messageWriter.markRead(conversation, true);
+        });
+    }
+
+    public ConversationResponse setPinned(Long staffUserId, Long conversationId, boolean pinned) {
+        return updateSettings(staffUserId, conversationId, settings -> settings.setPinned(pinned));
+    }
+
+    public ConversationResponse setMuted(Long staffUserId, Long conversationId, boolean muted) {
+        return updateSettings(staffUserId, conversationId, settings -> settings.setMuted(muted));
+    }
+
+    /** How many conversations wait for an answer (not messages): the badge on the admin menu. */
+    public UnreadCountResponse unreadCount() {
+        return new UnreadCountResponse(conversationRepository.countByUnreadForStaffGreaterThan(0));
+    }
+
+    private ConversationResponse updateSettings(Long staffUserId, Long conversationId,
+                                                Consumer<StaffConversationSettings> change) {
+        return writeTransaction.execute(status -> {
+            ConversationRow row = findRow(staffUserId, conversationId);
+            StaffConversationSettings settings = settingsRepository
+                    .findById(new StaffConversationSettingsId(staffUserId, conversationId))
+                    .orElseGet(() -> new StaffConversationSettings(staffUserId, conversationId));
+            change.accept(settings);
+            settingsRepository.save(settings);
+            return chatMapper.toStaffResponse(row.conversation(), settings.isPinned(), settings.isMuted(), null);
+        });
+    }
+
+    private ConversationRow findRow(Long staffUserId, Long conversationId) {
+        return conversationRepository.findRow(staffUserId, conversationId)
+                .orElseThrow(() -> notFound(conversationId));
+    }
+
+    private String staffName(Long staffUserId) {
+        try {
+            return userLookup.findUser(staffUserId).map(UserInfo::fullName).map(ChatRules::fitName)
+                    .orElse(FALLBACK_STAFF_NAME);
+        } catch (DependencyUnavailableException e) {
+            log.warn("Admin name unknown, signing with '{}': {}", FALLBACK_STAFF_NAME, e.getMessage());
+            return FALLBACK_STAFF_NAME;
+        }
+    }
+
+    private static Boolean onlineOf(Optional<Set<Long>> online, Conversation conversation) {
+        return online.map(ids -> ids.contains(conversation.getParticipantUserId())).orElse(null);
+    }
+
+    private static ResourceNotFoundException notFound(Long conversationId) {
+        return new ResourceNotFoundException("Conversation not found: " + conversationId);
+    }
+}

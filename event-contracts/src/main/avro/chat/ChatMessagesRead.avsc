@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "ChatMessagesRead",
+  "namespace": "com.fooddelivery.events.chat",
+  "doc": "One side of a support chat read the messages of the other side up to a message (the tick turns double). A hint with ids only. Producer: chat-service. Consumer: notification-service (live updates over WebSocket). Topic: fooddelivery.chat.messages-read (key: conversationId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "conversationId", "type": "long" },
+    { "name": "participantUserId", "type": "long" },
+    { "name": "readByStaff", "type": "boolean", "doc": "True when the support team read the participant's messages, false when the participant read the support team's" },
+    { "name": "upToMessageId", "type": "long", "doc": "Every message of the other side up to this id is now read" }
+  ]
+}

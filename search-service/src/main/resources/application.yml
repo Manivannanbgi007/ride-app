@@ -1,0 +1,137 @@
+server:
+  port: ${SERVER_PORT:8088}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies, so getRemoteAddr() is the real client IP.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: search-service
+  # Who is calling: the access token signed by user-service. Its public key is read from user-service (once, then
+  # kept); the issuer and audience must be the platform's (user-service app.jwt). The "role" claim becomes the role.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  profiles:
+    default: dev
+
+  # Elasticsearch holds only search copies; MySQL in the owning services stays the source of truth.
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 2s
+    socket-timeout: 5s
+
+  # Events (Avro) consumed from Kafka; the schemas live in Schema Registry.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Tracing: the trace context travels in the message headers, from the producer to every consumer
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+    consumer:
+      group-id: ${spring.application.name}
+      # A new consumer group starts from the oldest event: everything still in Kafka is indexed on first start.
+      # Older data is filled in by republishing it (see the admin "events/republish" endpoints).
+      auto-offset-reset: earliest
+      # A message that cannot be read must not block its partition: the error handler sends it to the dead-letter topic.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.KafkaAvroDeserializer
+        # Generated classes (e.g. MenuItemChanged) instead of generic records
+        specific.avro.reader: true
+    # Used only to forward failed messages to the dead-letter topics.
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      acks: all
+
+app:
+  # The services that own the data: asked what exists (and at which version) by the consistency check
+  restaurant-service:
+    base-url: ${RESTAURANT_SERVICE_URL:http://localhost:8082}
+    connect-timeout: 2s
+    read-timeout: 10s
+  catalog-service:
+    base-url: ${CATALOG_SERVICE_URL:http://localhost:8083}
+    connect-timeout: 2s
+    read-timeout: 10s
+  # review-service owns the ratings; search keeps a copy of the averages in its indexes (sort and filter by rating)
+  review:
+    base-url: ${REVIEW_SERVICE_URL:http://localhost:8094}
+    connect-timeout: 2s
+    read-timeout: 10s
+  # Pulls every rating average from review-service now and then (POST /api/v1/admin/search/ratings/sync runs it on demand)
+  rating-sync:
+    enabled: true
+    initial-delay: 30s
+    interval: 60s
+  # Compares the indexes with MySQL now and then and counts the differences (search_index_drift_documents)
+  consistency-check:
+    enabled: true
+    initial-delay: 5m
+    interval: 6h
+  kafka:
+    topics:
+      partitions: 3
+      replicas: ${KAFKA_TOPIC_REPLICAS:1}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  # Observability (Phase 14b): metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Search Service
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user=, event=, order=, payment=, delivery=
+    # (empty ones are left out). Loki and Grafana read the trace id from here to link logs and traces.
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} event=%X{eventId} order=%X{orderId} payment=%X{paymentId} delivery=%X{deliveryId} ){'[a-zA-Z]+= ', ''}"
+
+# The shared secret of the internal APIs (/api/v1/internal/**): the other services send it as X-Service-Token.
+# Required (no default) outside the dev profile.
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN}

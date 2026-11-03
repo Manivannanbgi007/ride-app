@@ -1,0 +1,126 @@
+### Food Delivery Platform - Admin Service (dashboard, reports, platform-wide audit log)
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+###
+### Everything here is for platform admins. admin-service keeps no business data of its own: the dashboard and
+### reports are put together from the services that own the data (asked at the same time, as the admin who asked).
+### If a service does not answer, its figures are null and it is listed in "unavailable".
+### The audit log holds a copy of every audit record of every service (they arrive through Kafka).
+###
+### Dates are calendar days in Asia/Kolkata. Reports without dates cover the last 30 days (at most 366).
+### Caller identity: the access token of an admin's sign-in below (Authorization: Bearer, role PLATFORM_ADMIN).
+
+@gateway = http://localhost:8080
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@auditId = {{auditSearch.response.body.$.content[0].auditId}}
+
+
+### 1. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+
+### ============================ DASHBOARD ============================
+
+### 2. Today's figures, totals, and charts for the last 7 days (days=1..90)
+GET {{gateway}}/api/v1/admin/dashboard?days=7
+Authorization: Bearer {{adminToken}}
+
+
+### ============================ REPORTS ============================
+
+### 3. Orders: totals, by status, by date, by restaurant, by delivery city
+GET {{gateway}}/api/v1/admin/reports/orders?fromDate=2026-10-01&toDate=2026-10-31&limit=10
+Authorization: Bearer {{adminToken}}
+
+### 4. Revenue per week (groupBy: DAY, WEEK or MONTH), per restaurant and per payment method
+GET {{gateway}}/api/v1/admin/reports/revenue?groupBy=WEEK
+Authorization: Bearer {{adminToken}}
+
+### 5. Restaurants: active, new, suspended, top and low-performing
+GET {{gateway}}/api/v1/admin/reports/restaurants?limit=5
+Authorization: Bearer {{adminToken}}
+
+### 6. Customers: new, active (ordered) and inactive, top customers, order frequency
+GET {{gateway}}/api/v1/admin/reports/customers
+Authorization: Bearer {{adminToken}}
+
+### 7. Deliveries: completed, failed, average delivery time, partner performance
+GET {{gateway}}/api/v1/admin/reports/deliveries
+Authorization: Bearer {{adminToken}}
+
+
+### ============================ AUDIT LOG ============================
+
+### 8. Search (all filters optional): service, adminUserId, action, entityType, entityId, requestId,
+###    fromDate, toDate, q (text in the reason, old or new value); newest first
+# @name auditSearch
+GET {{gateway}}/api/v1/admin/audit-logs?service=restaurant-service&page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 9. Everything that happened to one entity, across services
+GET {{gateway}}/api/v1/admin/audit-logs?entityType=RESTAURANT&entityId=1
+Authorization: Bearer {{adminToken}}
+
+### 10. One record, with the other records of the same admin request
+GET {{gateway}}/api/v1/admin/audit-logs/{{auditId}}
+Authorization: Bearer {{adminToken}}
+
+### 11. Which actions the log has, per service (for filter lists)
+GET {{gateway}}/api/v1/admin/audit-logs/actions
+Authorization: Bearer {{adminToken}}
+
+### 12. Once: load the audit records made before Phase 13 (every service sends its records again; safe to repeat)
+POST {{gateway}}/api/v1/admin/audit-logs/backfill
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Load the audit records made before the platform-wide log existed" }
+
+
+### ============== WHAT THE DASHBOARD IS BUILT FROM (each service's own numbers) ==============
+
+### 13. user-service: accounts per role and status, sign-ups in a period
+GET {{gateway}}/api/v1/admin/users/stats?fromDate=2026-10-01
+Authorization: Bearer {{adminToken}}
+
+### 14. restaurant-service: restaurants per status, submitted in a period
+GET {{gateway}}/api/v1/admin/restaurants/stats
+Authorization: Bearer {{adminToken}}
+
+### 15. catalog-service: menu items now
+GET {{gateway}}/api/v1/admin/menu-items/stats
+Authorization: Bearer {{adminToken}}
+
+### 16. order-service: orders and revenue (per status, payment method, day), plus restaurants, customers, cities
+GET {{gateway}}/api/v1/admin/orders/stats?fromDate=2026-10-01
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/orders/stats/restaurants?limit=5
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/orders/stats/customers?limit=5
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/orders/stats/locations
+Authorization: Bearer {{adminToken}}
+
+### 17. payment-service and delivery-service summaries (existing since Phases 6 and 10), partner performance (new)
+GET {{gateway}}/api/v1/admin/payments/summary
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/deliveries/summary
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/delivery-partners/stats?limit=5
+Authorization: Bearer {{adminToken}}

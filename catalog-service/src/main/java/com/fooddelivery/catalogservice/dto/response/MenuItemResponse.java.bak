@@ -1,0 +1,30 @@
+package com.fooddelivery.catalogservice.dto.response;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+import com.fooddelivery.catalogservice.entity.FoodType;
+import com.fooddelivery.catalogservice.entity.MenuItemStatus;
+
+/**
+ * Full menu item, for the restaurant owner and platform admins.
+ * {@code restaurantName} is filled only in the admin list (the owner knows their own restaurant); otherwise null.
+ */
+public record MenuItemResponse(
+        Long id,
+        Long restaurantId,
+        Long categoryId,
+        String categoryName,
+        String name,
+        String description,
+        BigDecimal price,
+        FoodType foodType,
+        String imageUrl,
+        boolean available,
+        MenuItemStatus status,
+        Instant createdAt,
+        Instant updatedAt,
+        Long version,
+        String restaurantName
+) {
+}

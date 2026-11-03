@@ -1,0 +1,139 @@
+### Food Delivery Platform - Chat Service (support chat)
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+###
+### Every customer, restaurant owner and delivery partner has at most ONE conversation, with Support.
+### All platform admins share one inbox and any of them can read and answer. There is no conversation id on the
+### participant side: the API always works on the caller's own conversation. Plain text only.
+### New messages are announced on the live WebSocket (notification-service); the page then re-reads over REST.
+###
+### Caller identity: the access token's role, CUSTOMER (or RESTAURANT_ADMIN / DELIVERY_PARTNER) for /chat,
+### PLATFORM_ADMIN for /admin/chat. clientMessageId is a UUID the client invents once per message: sending the
+### same one again returns the saved message (200) instead of a duplicate. {{$guid}} makes a new one per request,
+### so to try the retry, copy the id of a request into a fixed value.
+
+@gateway = http://localhost:8080
+@service = http://localhost:8096
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+@customerId = {{customerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@conversationId = {{customerSends.response.body.$.conversationId}}
+@retryId = 6f1c3a52-0f4b-4d52-9e56-3d6d3f0f0a11
+
+
+### ============================ CUSTOMER ============================
+
+### 1. Customer login -> customerId
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+### 2. My conversation (404 until I wrote the first message: the UI shows an empty chat)
+GET {{service}}/api/v1/chat/conversation
+Authorization: Bearer {{customerToken}}
+
+### 3. Write to Support (201; creates the conversation on the first message)
+###    body: 1 to 2000 characters after trimming; 429 above 30 messages a minute; 503 when user-service is down.
+# @name customerSends
+POST {{service}}/api/v1/chat/messages
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "body": "Where is my order?", "clientMessageId": "{{$guid}}" }
+
+### 4. The same message again (a retry after a lost response) -> 200 with the same message, nothing duplicated
+POST {{service}}/api/v1/chat/messages
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "body": "Retry of the same message", "clientMessageId": "{{retryId}}" }
+
+### 5. My messages: the latest 30, oldest first. hasMore / nextBeforeId page backwards:
+###    GET .../messages?beforeId=<nextBeforeId>&limit=30
+GET {{service}}/api/v1/chat/messages?limit=30
+Authorization: Bearer {{customerToken}}
+
+### 6. I read Support's messages (204; Support sees the ticks turn double)
+POST {{service}}/api/v1/chat/read
+Authorization: Bearer {{customerToken}}
+
+### 7. A blank message -> 400
+POST {{service}}/api/v1/chat/messages
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "body": "   ", "clientMessageId": "{{$guid}}" }
+
+### 8. Platform admins have no conversation of their own -> 403
+GET {{service}}/api/v1/chat/conversation
+Authorization: Bearer {{adminToken}}
+
+
+### ============================ ADMIN (the shared inbox) ============================
+
+### 9. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 10. The inbox: my pinned first, then the latest activity. search: name or last message; size at most 50.
+###     participant.online is null when presence is unknown.
+GET {{service}}/api/v1/admin/chat/conversations?search=&page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 11. How many conversations wait for an answer (the menu badge)
+GET {{service}}/api/v1/admin/chat/unread-count
+Authorization: Bearer {{adminToken}}
+
+### 12. One conversation
+GET {{service}}/api/v1/admin/chat/conversations/{{conversationId}}
+Authorization: Bearer {{adminToken}}
+
+### 13. Its messages (same paging); q searches the text inside this conversation (case-insensitive)
+GET {{service}}/api/v1/admin/chat/conversations/{{conversationId}}/messages?limit=30&q=order
+Authorization: Bearer {{adminToken}}
+
+### 14. I read it (204). The inbox is shared: this clears the unread count for every admin.
+POST {{service}}/api/v1/admin/chat/conversations/{{conversationId}}/read
+Authorization: Bearer {{adminToken}}
+
+### 15. Answer as Support (201); signed with my name from user-service ("Support" if it cannot tell)
+POST {{service}}/api/v1/admin/chat/conversations/{{conversationId}}/messages
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "body": "It left the kitchen five minutes ago.", "clientMessageId": "{{$guid}}" }
+
+### 16. Pin and mute are mine only (200 with the conversation)
+PUT {{service}}/api/v1/admin/chat/conversations/{{conversationId}}/pin
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "pinned": true }
+
+###
+PUT {{service}}/api/v1/admin/chat/conversations/{{conversationId}}/mute
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "muted": true }
+
+### 17. Start (or open) the conversation with a user: 201 when new, 200 when it existed.
+###     404 unknown user, 422 for a platform admin.
+POST {{service}}/api/v1/admin/chat/conversations
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "userId": {{customerId}} }
+
+### 18. Customers cannot read the admin API -> 403
+GET {{service}}/api/v1/admin/chat/conversations
+Authorization: Bearer {{customerToken}}

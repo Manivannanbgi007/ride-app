@@ -1,0 +1,93 @@
+### Food Delivery Platform - Review Service (reviews of delivered orders)
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+###
+### A customer reviews an order once it is DELIVERED: overall stars, up to 4 tags, a comment and optionally
+### stars per dish of that order. Platform admins read the reviews, a summary and the top-rated dishes.
+### Run order-service.http and delivery-service.http first: you need an order that is DELIVERED
+### (set @orderId below to its id, or run the order flow of delivery-service.http).
+###
+### Caller identity: the access token's role, CUSTOMER for /reviews, PLATFORM_ADMIN for /admin/**.
+
+@gateway = http://localhost:8080
+@service = http://localhost:8094
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@orderId = 1
+@menuItemId = 1
+
+
+### ============================ CUSTOMER ============================
+
+### 1. Customer login -> customerToken
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+### 2. Do I have a review of this order yet? (404 until I write one: the storefront then shows the form)
+GET {{gateway}}/api/v1/reviews/orders/{{orderId}}
+Authorization: Bearer {{customerToken}}
+
+### 3. Review the delivered order
+###    tags: DELICIOUS, EXCELLENT, GOOD_SERVICE, FAST_DELIVERY, GOOD_VALUE, GOOD_PACKAGING (at most 4, each once)
+###    dishRatings are optional; every menuItemId must be a line of the order, each once.
+###    404: unknown order or not yours; 422: not delivered; 409: already reviewed.
+# @name createReview
+POST {{gateway}}/api/v1/reviews
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "orderId": {{orderId}},
+  "rating": 5,
+  "comment": "Hot, fresh and early.",
+  "tags": ["DELICIOUS", "FAST_DELIVERY"],
+  "dishRatings": [ { "menuItemId": {{menuItemId}}, "rating": 5 } ]
+}
+
+### 4. A second review of the same order -> 409
+POST {{gateway}}/api/v1/reviews
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "orderId": {{orderId}}, "rating": 3 }
+
+### 5. Customers cannot read the admin API -> 403
+GET {{gateway}}/api/v1/admin/reviews
+Authorization: Bearer {{customerToken}}
+
+
+### ============================ ADMIN ============================
+
+### 6. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 7. The review list, newest first. Filters: restaurantId, rating (1-5), tag, from, to (yyyy-MM-dd, inclusive)
+###    sort: createdAt,desc (default) | createdAt,asc | rating,desc | rating,asc; size at most 50
+GET {{gateway}}/api/v1/admin/reviews?rating=5&tag=DELICIOUS&from=2026-01-01&sort=createdAt,desc&page=0&size=10
+Authorization: Bearer {{adminToken}}
+
+### 8. Summary: number of reviews, average (one decimal) and how many reviews per star
+GET {{gateway}}/api/v1/admin/reviews/summary?from=2026-01-01
+Authorization: Bearer {{adminToken}}
+
+### 9. Top-rated dishes (size at most 12): best average first, then most ratings.
+###    The picture and category come from catalog-service; without it the dish still shows, with the saved name.
+GET {{gateway}}/api/v1/admin/reviews/featured-dishes?from=2026-01-01&page=0&size=3
+Authorization: Bearer {{adminToken}}
+
+
+### ============================ DIRECT (without the gateway) ============================
+
+### 10. Swagger UI: http://localhost:8094/swagger-ui.html ; health:
+GET {{service}}/actuator/health

@@ -1,0 +1,39 @@
+# Integration tests (Testcontainers provides the datasource and Kafka).
+spring:
+  kafka:
+    properties:
+      # In-memory Schema Registry, shared by every serializer and deserializer in the test JVM.
+      schema.registry.url: mock://user-service-tests
+    # Used by the tests to read the published events.
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        specific.avro.reader: true
+
+app:
+  outbox:
+    poll-interval: 200ms
+  bootstrap-admin:
+    email: admin@test.local
+    password: AdminPass123
+  jwt:
+    allow-ephemeral-key: true
+  auth:
+    allowed-origins: http://localhost:5180
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP and Kafka headers, and outbox rows), which the tests rely on.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+
+# Personal overrides of the environment files (never committed)
+.env.local
+.env.*.local
+
+# Editors and logs
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.log

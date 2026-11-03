@@ -1,0 +1,24 @@
+{
+  "type": "record",
+  "name": "OrderCancelled",
+  "namespace": "com.fooddelivery.events.order",
+  "doc": "An order ended without delivery: cancelled (customer or admin) or rejected (restaurant). Producer: order-service. Topic: fooddelivery.order.cancelled (key: orderId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "orderId", "type": "long" },
+    { "name": "customerId", "type": "long" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "finalStatus", "type": "string", "doc": "CANCELLED or REJECTED" },
+    { "name": "previousStatus", "type": "string" },
+    { "name": "cancelledBy", "type": "string", "doc": "CUSTOMER, RESTAURANT, ADMIN or SYSTEM" },
+    { "name": "reason", "type": ["null", "string"], "default": null },
+    { "name": "paymentMethod", "type": "string" },
+    { "name": "paymentStatus", "type": "string", "doc": "PAID means money must be returned" },
+    { "name": "totalAmount", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "currency", "type": "string" },
+    { "name": "couponReservationId", "type": ["null", "long"], "default": null,
+      "doc": "Added in 1.5.0: the coupon use to give back (null when no coupon was used)" }
+  ]
+}

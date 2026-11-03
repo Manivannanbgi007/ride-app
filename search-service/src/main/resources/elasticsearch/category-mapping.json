@@ -1,0 +1,18 @@
+{
+  "dynamic": "strict",
+  "properties": {
+    "id": { "type": "long" },
+    "name": {
+      "type": "text", "analyzer": "folded",
+      "fields": {
+        "autocomplete": { "type": "text", "analyzer": "autocomplete", "search_analyzer": "folded" }
+      }
+    },
+    "description": { "type": "text", "analyzer": "folded" },
+    "imageUrl": { "type": "keyword", "index": false },
+    "displayOrder": { "type": "integer" },
+    "status": { "type": "keyword" },
+    "sourceVersion": { "type": "long" },
+    "indexedAt": { "type": "date" }
+  }
+}

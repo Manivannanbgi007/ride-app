@@ -1,0 +1,919 @@
+@import 'tailwindcss';
+
+/*
+ * The application's colours, font and shadows. Each one becomes Tailwind classes:
+ * --color-brand-500 -> bg-brand-500, text-brand-500, border-brand-500; --shadow-card -> shadow-card; and so on.
+ * Change a colour here and every screen follows (charts read the same values from utils/chartColors.ts).
+ */
+@theme {
+  /* Plus Jakarta Sans (variable, 200-800), bundled with the application: no font service is called */
+  --font-sans: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /*
+   * Green, from the theme colour #39c576 (brand-500): the same hue, lighter and darker. The bright 500 is the
+   * application's face: buttons, active and selected items, steps, badges. Its text and icons are --color-on-brand,
+   * a deep green of the same hue (6.7:1; white would be only 2.2:1); 400 is its hover. White text goes on 600 or
+   * darker (600 is the lightest readable for small text, 4.6:1): the deep hero banners and the assistant's panel.
+   */
+  --color-brand-50: #effbf4;
+  --color-brand-100: #dbf5e6;
+  --color-brand-200: #b7ebce;
+  --color-brand-300: #8cdeb0;
+  --color-brand-400: #61d192;
+  --color-brand-500: #39c576;
+  --color-brand-600: #1d864c;
+  --color-brand-700: #197142;
+  --color-brand-800: #135d37;
+  --color-brand-900: #0e492b;
+  --color-on-brand: #052e18;
+
+  /*
+   * Page and text: a soft neutral with a hint of the brand green (instead of a lilac grey), dark green-slate text,
+   * and a secondary text colour dark enough to read comfortably on white (WCAG AA).
+   */
+  --color-page: #f3f6f4;
+  --color-ink: #1c2c20;
+  --color-ink-soft: #5a6d5e;
+  --color-line: #e4ebe7;
+
+  /*
+   * Meaning-based colours, so that light and dark mode only change values here (see "Dark mode" at the end):
+   *   surface   cards, fields, menus (was plain white)
+   *   scrim     the veil behind a dialog
+   *   on-accent text on a bright colour that must stay dark (amber), whatever the theme
+   *   on-brand  text and icons on the bright brand-500 and its 400 hover (defined with the brand scale)
+   *   brand-text(-strong, -deep) green text on a light surface or tint (links, badges, titles); the brand
+   *             shades 600-900 stay for backgrounds and gradients, where white text sits on them
+   *   danger-text, warning-text, sunset-text  the same for red, amber and orange text
+   *   chart-track, chart-berry  chart colours that must change with the theme
+   */
+  --color-surface: #ffffff;
+  --color-scrim: #1c2c20;
+  --color-on-accent: #1c2c20;
+  --color-brand-text: #197142;
+  --color-brand-text-strong: #135d37;
+  --color-brand-text-deep: #0e492b;
+  --color-danger-text: #c42f2f;
+  --color-warning-text: #8a6200;
+  --color-sunset-text: #b84300;
+  --color-chart-track: #eaf0ec;
+  --color-chart-berry: #7a1620;
+  /* The slate-blue strip of a featured dish's card (reviewer and rating), and its text */
+  --color-strip: #4a5a85;
+  --color-on-strip: #ffffff;
+  --color-on-strip-soft: #d3dbf0;
+  /*
+   * The assistant's chat panel: a deep brand-green backdrop (top to bottom) with white text and white-tinted bubbles
+   * on it. White text reads at least 6:1 on both, and on the 10% white bubbles too.
+   */
+  --color-assistant-top: #197142;
+  --color-assistant-bottom: #135d37;
+  /*
+   * Toasts (components/common/Toast): each kind is a two-colour gradient, from its signal colour to a deeper
+   * neighbour (green to teal, red to crimson, amber to orange, blue to indigo). White text reads at least 4.5:1 at
+   * both ends, so the toasts look the same in light and dark mode.
+   */
+  --color-toast-success-start: #1d864c;
+  --color-toast-success-end: #0f766e;
+  --color-toast-error-start: #d93b3b;
+  --color-toast-error-end: #9f1239;
+  --color-toast-warning-start: #b45309;
+  --color-toast-warning-end: #c2410c;
+  --color-toast-info-start: #1f73b7;
+  --color-toast-info-end: #4338ca;
+
+  /*
+   * Status badges (components/common/Badge): a clearly coloured background with dark text of the same colour, the
+   * same on every screen. "-100" is the background, "-ink" the text (at least 4.5:1 on it, light and dark).
+   */
+  --color-danger-100: #ffd3d3;
+  --color-danger-ink: #8f1a1a;
+  --color-warning-100: #ffe49a;
+  --color-warning-ink: #5f4200;
+  --color-info-100: #c6e4f6;
+  --color-info-ink: #0d567f;
+
+  /*
+   * Complementary colours for the dashboard's tiles, charts and delivery stages: a deep berry, a sunset orange, a
+   * ruby and a lime, each next to the brand green (the primary colour stays green).
+   */
+  --color-berry-700: #7a1620;
+  --color-berry-800: #5b0f17;
+  --color-berry-900: #3f0a10;
+  --color-sunset-50: #fff3ea;
+  --color-sunset-500: #f26a1b;
+  --color-sunset-600: #dc5509;
+  --color-ruby-600: #c92a22;
+  --color-lime-500: #8bc34a;
+  --color-lime-600: #6fa52f;
+
+  /*
+   * Signal colours. Filled backgrounds with white text use danger-700 and info-600: the lightest red and blue with
+   * white text readable at small sizes (5.4:1 and 5.0:1); 500 and danger-600 stay for accents. (The toasts have
+   * their own gradients: --color-toast-*.)
+   */
+  --color-danger-50: #fff0f0;
+  --color-danger-500: #f05252;
+  --color-danger-600: #d93b3b;
+  --color-danger-700: #c62f2f;
+  --color-info-50: #eaf5fc;
+  --color-info-500: #2d9cdb;
+  --color-info-600: #1f73b7;
+  --color-warning-50: #fff8e6;
+  --color-warning-500: #ffc327;
+  --color-warning-700: #9a6f00;
+
+  /*
+   * Order statuses (the owner's Orders page): each step of an order has its own colour, so a glance tells them
+   * apart. "-from" and "-to" are a gradient with white text (at least 4.5:1 at both ends, the same in both themes);
+   * "-soft" is a light tint and "-text" the status's text on it and on a surface (at least 4.5:1; see dark mode).
+   *   placed  orange to rose (waiting for the owner)   accepted   violet      preparing  amber
+   *   ready   sky to blue                              out        cyan to teal delivered  the brand green
+   *   rejected red to crimson                          cancelled  slate
+   */
+  --color-st-placed-from: #c2410c;
+  --color-st-placed-to: #e11d48;
+  --color-st-placed-soft: #fff1e8;
+  --color-st-placed-text: #b13a0a;
+  --color-st-accepted-from: #6d28d9;
+  --color-st-accepted-to: #4f46e5;
+  --color-st-accepted-soft: #f3efff;
+  --color-st-accepted-text: #5b21b6;
+  --color-st-preparing-from: #b45309;
+  --color-st-preparing-to: #a16207;
+  --color-st-preparing-soft: #fff7df;
+  --color-st-preparing-text: #8a4b05;
+  --color-st-ready-from: #0369a1;
+  --color-st-ready-to: #1d4ed8;
+  --color-st-ready-soft: #e9f3fd;
+  --color-st-ready-text: #0b5b8e;
+  --color-st-out-from: #0e7490;
+  --color-st-out-to: #0f766e;
+  --color-st-out-soft: #e3f7f6;
+  --color-st-out-text: #0b6470;
+  --color-st-delivered-from: #1d864c;
+  --color-st-delivered-to: #197142;
+  --color-st-delivered-soft: #effbf4;
+  --color-st-delivered-text: #197142;
+  --color-st-rejected-from: #b91c1c;
+  --color-st-rejected-to: #9f1239;
+  --color-st-rejected-soft: #fff0f0;
+  --color-st-rejected-text: #b42020;
+  --color-st-cancelled-from: #475569;
+  --color-st-cancelled-to: #334155;
+  --color-st-cancelled-soft: #f1f4f8;
+  --color-st-cancelled-text: #475569;
+  /* The Orders page's banner: brand green to teal to indigo, white text at least 4.5:1 all along */
+  --color-hero-orders-from: #197142;
+  --color-hero-orders-via: #0f766e;
+  --color-hero-orders-to: #4338ca;
+
+  /*
+   * Cards: a hairline (the 1px spread), a close soft shadow and a long faint one, as on current dashboards, instead
+   * of a heavy drop shadow. Corners are rounder (rounded-xl / 2xl / 3xl everywhere follow these three values).
+   */
+  --shadow-card:
+    0 0 0 1px rgb(16 40 28 / 0.05), 0 1px 2px rgb(16 40 28 / 0.04),
+    0 14px 32px -14px rgb(16 40 28 / 0.14);
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.75rem;
+  /* The green glow under main buttons */
+  --shadow-brand: 0 6px 16px -6px rgb(57 197 118 / 0.55);
+  --shadow-brand-lg: 0 12px 26px -8px rgb(57 197 118 / 0.6);
+  --shadow-danger: 0 6px 16px -6px rgb(217 59 59 / 0.5);
+
+  /*
+   * Page widths (max-w-frame, max-w-partner, ...), each about 15% wider than before so wide screens are used:
+   *   frame         the customer and owner areas: header, page and footer (was max-w-7xl, 80rem)
+   *   partner       the delivery partner area's bars and pages (was 88.32rem)
+   *   column        a page of one column: payment, support, notifications, the calendar's day (was max-w-3xl)
+   *   column-narrow a page of one short form: the customer's profile (was max-w-2xl)
+   * Below these widths a page simply fills the screen (with its side padding): nothing is fixed.
+   */
+  --container-frame: 92rem;
+  --container-partner: 101.5rem;
+  --container-column: 55rem;
+  --container-column-narrow: 48rem;
+
+  /* Small playful moves for the header icons on hover (animate-ring, animate-pop, animate-nudge) */
+  --animate-ring: ring 0.7s ease-in-out;
+  --animate-pop: pop 0.45s ease-out;
+  --animate-nudge: nudge 0.5s ease-out;
+  /*
+   * Tooltips: they spring out of their icon with a slight bounce (from the side set by --tooltip-from-x / -y),
+   * a shine sweeps across once, and they slip back when they go.
+   */
+  --animate-tooltip-in: tooltip-in 0.32s cubic-bezier(0.22, 1.25, 0.36, 1) both;
+  --animate-tooltip-out: tooltip-out 0.14s ease-in both;
+  --animate-tooltip-shine: tooltip-shine 0.9s ease-out 0.12s both;
+  /* The dashed route of the live delivery card: its dashes run toward the destination */
+  --animate-route-flow: route-flow 1.2s linear infinite;
+  /* A new page rises into place (see PageTransition) and loading placeholders shimmer */
+  --animate-page-in: page-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  /* Dropdown lists (components/common/Select): they unfold from their field */
+  --animate-dropdown-in: dropdown-in 0.18s cubic-bezier(0.22, 1.1, 0.36, 1) both;
+  /*
+   * Loading (components/common/Loader): the page loader fades in only after 0.2 s, so a fast connection never
+   * sees it flash; its mark pulses and bobs, three dots wave. The bar at the top creeps toward the end while the
+   * next page downloads (it never claims to be done before it is).
+   */
+  --animate-loader-in: loader-in 0.35s ease-out 0.2s both;
+  --animate-loader-pulse: loader-pulse 1.8s ease-out infinite;
+  --animate-loader-bob: loader-bob 1.8s ease-in-out infinite;
+  --animate-loader-dot: loader-dot 1.2s ease-in-out infinite;
+  --animate-progress-creep: progress-creep 12s cubic-bezier(0.1, 0.75, 0.25, 1) both;
+  --animate-progress-glint: progress-glint 1.3s ease-in-out infinite;
+  /*
+   * The partner's illustrations (components/business/PartnerArea/PartnerIllustrations): clouds drift, the road's
+   * dashes run under the rider, the rider and the pins bob, stars twinkle, the "z" of a sleeping scooter rises.
+   */
+  --animate-scene-drift: scene-drift 26s ease-in-out infinite alternate;
+  --animate-scene-road: scene-road 0.9s linear infinite;
+  --animate-scene-bob: scene-bob 1.1s ease-in-out infinite;
+  --animate-scene-float: scene-float 2.4s ease-in-out infinite;
+  --animate-scene-twinkle: scene-twinkle 3s ease-in-out infinite;
+  --animate-scene-zzz: scene-zzz 3.2s ease-in-out infinite;
+  --animate-scene-sweep: scene-sweep 4.5s linear infinite;
+  --animate-scene-wind: scene-wind 0.8s ease-out infinite;
+  /*
+   * The admin pages' motion (components/common/PageHero, KpiStrip, StatCard, Table, EmptyState, QuickFilters):
+   * blocks rise into place one after the other (the `stagger` utility below), chips pop in, the hero's soft shapes
+   * drift and its icon floats, a sheen sweeps across highlighted tiles, an empty list's icon breathes inside a ring.
+   */
+  /*
+   * backwards, not both: a block waits hidden for its turn, but once in place keeps no transform, so it starts no
+   * stacking context of its own and a menu opened inside it can still reach over the block below.
+   */
+  --animate-rise-in: rise-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  --animate-pop-in: pop-in 0.45s cubic-bezier(0.22, 1.25, 0.36, 1) backwards;
+  --animate-blob: blob 18s ease-in-out infinite alternate;
+  --animate-float: float 4.5s ease-in-out infinite;
+  --animate-sheen: sheen 3.2s ease-in-out infinite;
+  --animate-breathe: breathe 2.8s ease-in-out infinite;
+  --animate-ping-soft: ping-soft 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  /* A share bar grows from its left end when it appears (owner pages: status shares, top dishes, ratings) */
+  --animate-bar-grow: bar-grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+
+  @keyframes bar-grow {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: none;
+    }
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes blob {
+    0% {
+      transform: translate(0, 0) scale(1);
+    }
+    50% {
+      transform: translate(28px, -18px) scale(1.08);
+    }
+    100% {
+      transform: translate(-14px, 14px) scale(0.95);
+    }
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+
+  @keyframes sheen {
+    0% {
+      transform: translateX(-150%) skewX(-20deg);
+    }
+    55%,
+    100% {
+      transform: translateX(350%) skewX(-20deg);
+    }
+  }
+
+  @keyframes breathe {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.07);
+    }
+  }
+
+  @keyframes ping-soft {
+    0% {
+      transform: scale(1);
+      opacity: 0.5;
+    }
+    80%,
+    100% {
+      transform: scale(1.75);
+      opacity: 0;
+    }
+  }
+
+  @keyframes scene-drift {
+    from {
+      transform: translateX(-18px);
+    }
+    to {
+      transform: translateX(22px);
+    }
+  }
+
+  @keyframes scene-road {
+    to {
+      stroke-dashoffset: -44;
+    }
+  }
+
+  @keyframes scene-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-2.5px);
+    }
+  }
+
+  @keyframes scene-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-7px);
+    }
+  }
+
+  @keyframes scene-twinkle {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes scene-zzz {
+    0% {
+      opacity: 0;
+      transform: translate(0, 6px);
+    }
+    30% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(10px, -16px);
+    }
+  }
+
+  @keyframes scene-sweep {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes scene-wind {
+    from {
+      opacity: 0.7;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-26px);
+    }
+  }
+
+  @keyframes loader-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes loader-pulse {
+    from {
+      opacity: 0.7;
+      transform: scale(0.8);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.35);
+    }
+  }
+
+  @keyframes loader-bob {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-6deg);
+    }
+    50% {
+      transform: translateY(-2px) rotate(6deg);
+    }
+  }
+
+  @keyframes loader-dot {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0);
+    }
+    40% {
+      opacity: 1;
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes progress-creep {
+    from {
+      transform: scaleX(0.04);
+    }
+    to {
+      transform: scaleX(0.92);
+    }
+  }
+
+  @keyframes progress-glint {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(400%);
+    }
+  }
+
+  @keyframes tooltip-in {
+    from {
+      opacity: 0;
+      transform: translate(var(--tooltip-from-x, -10px), var(--tooltip-from-y, 0)) scale(0.88);
+    }
+    to {
+      opacity: 1;
+      transform: translate(0, 0) scale(1);
+    }
+  }
+
+  @keyframes tooltip-out {
+    from {
+      opacity: 1;
+      transform: translate(0, 0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translate(var(--tooltip-from-x, -10px), var(--tooltip-from-y, 0)) scale(0.94);
+    }
+  }
+
+  @keyframes route-flow {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 24px 0;
+    }
+  }
+
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes dropdown-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--dropdown-from, -6px)) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes tooltip-shine {
+    from {
+      left: -60%;
+    }
+    to {
+      left: 130%;
+    }
+  }
+
+  @keyframes ring {
+    0%,
+    100% {
+      transform: rotate(0deg);
+    }
+    15% {
+      transform: rotate(16deg);
+    }
+    30% {
+      transform: rotate(-14deg);
+    }
+    45% {
+      transform: rotate(10deg);
+    }
+    60% {
+      transform: rotate(-6deg);
+    }
+    75% {
+      transform: rotate(3deg);
+    }
+  }
+
+  @keyframes pop {
+    0%,
+    100% {
+      transform: scale(1) rotate(0deg);
+    }
+    40% {
+      transform: scale(1.25) rotate(-8deg);
+    }
+    70% {
+      transform: scale(0.95) rotate(4deg);
+    }
+  }
+
+  @keyframes nudge {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    40% {
+      transform: translateY(-3px);
+    }
+    70% {
+      transform: translateY(1px);
+    }
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-page font-sans text-ink antialiased;
+    font-feature-settings:
+      'cv11' 1,
+      'ss01' 1;
+  }
+
+  /*
+   * The page backdrop, made from the brand green: a light mint wash with an "aurora" of soft glows (brand green top
+   * right, mint top left, lime along the bottom) and a faint dot grid that fades out below the top of the screen.
+   * Two fixed layers behind everything: they stay still while the page scrolls (cheaper than a fixed background, and
+   * it works on phones too). Cards sit on it with a hairline and a soft shadow; --color-page stays the tint of panels
+   * inside cards. The colours are the --backdrop-* values below (other ones in dark mode).
+   */
+  body::before,
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  body::before {
+    background-image:
+      radial-gradient(64rem 38rem at 100% -10%, var(--backdrop-glow-brand), transparent 66%),
+      radial-gradient(52rem 32rem at -8% 0%, var(--backdrop-glow-mint), transparent 64%),
+      radial-gradient(56rem 30rem at 40% 118%, var(--backdrop-glow-lime), transparent 66%),
+      linear-gradient(180deg, var(--backdrop-top) 0%, var(--backdrop-bottom) 100%);
+  }
+
+  body::after {
+    background-image: radial-gradient(var(--backdrop-dot) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 25%, transparent 100%);
+  }
+
+  /* Plus Jakarta Sans reads best a touch tighter in headings */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+
+  /* Slim scrollbars that match the theme (the browser's own wide grey ones look dated) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  /* Figures line up in columns */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Tailwind v4 leaves buttons with the arrow cursor: every clickable control shows the hand, a disabled one not */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  summary,
+  select:not(:disabled),
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-100);
+    color: var(--color-ink);
+  }
+
+  /* People who asked their system for less motion get (almost) none */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/*
+ * A block of a list rises (or pops) into place a little after the one before it: the element sets --stagger to its
+ * index (utils/motion.ts, stagger(i)). From the 15th on they all come together, so a long list never keeps one
+ * waiting.
+ */
+@utility stagger {
+  animation-delay: calc(min(var(--stagger, 0), 14) * 45ms);
+}
+
+/*
+ * Dark mode. The theme is the data-theme attribute of <html> (set by src/theme and, before the first paint, by the
+ * small script in index.html). Dark mode is nothing but other values for the tokens above and in @theme: no
+ * component has its own dark colours. The brand shades 500-900 stay (buttons, gradients and tiles look the same);
+ * the light tints (50-200) become deep greens, and green text becomes light green.
+ */
+:root {
+  color-scheme: light;
+
+  /* The page backdrop (see body::before and body::after): all from the theme green #39c576 and its neighbours */
+  --backdrop-top: #f5fbf7;
+  --backdrop-bottom: #ecf6f0;
+  --backdrop-glow-brand: rgb(57 197 118 / 0.22);
+  --backdrop-glow-mint: rgb(46 196 160 / 0.13);
+  --backdrop-glow-lime: rgb(139 195 74 / 0.14);
+  --backdrop-dot: rgb(29 134 76 / 0.11);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-page: #0d1410;
+  --color-surface: #151f19;
+  --color-ink: #e7f0ea;
+  --color-ink-soft: #9fb2a6;
+  --color-line: #36493b;
+  --color-scrim: #000000;
+
+  --color-brand-50: #11271b;
+  --color-brand-100: #153222;
+  --color-brand-200: #1f4731;
+  --color-brand-300: #2b6445;
+  --color-brand-text: #5cd892;
+  --color-brand-text-strong: #7ae0a6;
+  --color-brand-text-deep: #a6ebc3;
+
+  --color-danger-50: #3a1d20;
+  --color-danger-text: #ff8686;
+  --color-info-50: #132a3a;
+  --color-warning-50: #382e12;
+  --color-warning-text: #f2c75a;
+  --color-sunset-50: #3a2414;
+  --color-sunset-text: #f5934f;
+
+  --color-chart-track: #243229;
+  --color-chart-berry: #e0707f;
+  --color-strip: #2b3556;
+  --color-on-strip: #f1f4fc;
+  --color-on-strip-soft: #b3bedd;
+  --color-assistant-top: #133925;
+  --color-assistant-bottom: #0b2317;
+
+  --color-danger-100: #5a2428;
+  --color-danger-ink: #ffb8b8;
+  --color-warning-100: #4f3d0e;
+  --color-warning-ink: #ffdc78;
+  --color-info-100: #17405c;
+  --color-info-ink: #a3d8f6;
+  --color-berry-700: #9c2234;
+
+  /* Order statuses: deep tints and light text; the gradients stay */
+  --color-st-placed-soft: #3a1d12;
+  --color-st-placed-text: #fdba8c;
+  --color-st-accepted-soft: #251c47;
+  --color-st-accepted-text: #c4b5fd;
+  --color-st-preparing-soft: #33280c;
+  --color-st-preparing-text: #f5cf6b;
+  --color-st-ready-soft: #12294a;
+  --color-st-ready-text: #93c5fd;
+  --color-st-out-soft: #0d3036;
+  --color-st-out-text: #67e3ea;
+  --color-st-delivered-soft: #11271b;
+  --color-st-delivered-text: #5cd892;
+  --color-st-rejected-soft: #3a1619;
+  --color-st-rejected-text: #fca5a5;
+  --color-st-cancelled-soft: #1f2732;
+  --color-st-cancelled-text: #cbd5e1;
+
+  --shadow-card:
+    0 0 0 1px rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.4),
+    0 16px 32px -14px rgb(0 0 0 / 0.6);
+
+  --backdrop-top: #0e1812;
+  --backdrop-bottom: #0a110d;
+  --backdrop-glow-brand: rgb(57 197 118 / 0.3);
+  --backdrop-glow-mint: rgb(46 196 160 / 0.13);
+  --backdrop-glow-lime: rgb(139 195 74 / 0.11);
+  --backdrop-dot: rgb(122 224 166 / 0.08);
+}
+
+/* The chart library draws its own hover box with inline colours: it follows the theme too */
+.recharts-default-tooltip {
+  background-color: var(--color-surface) !important;
+  border-color: var(--color-line) !important;
+  color: var(--color-ink);
+}
+
+/*
+ * While the theme is being switched (a third of a second, set by src/theme/applyTheme.ts) colours glide from one
+ * theme to the other instead of jumping. Only colours: nothing moves, so nothing shifts. Not kept on afterwards, so
+ * the page's own transitions are untouched, and not at all for people who asked for less motion.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-theme-changing],
+  :root[data-theme-changing] *,
+  :root[data-theme-changing] *::before,
+  :root[data-theme-changing] *::after {
+    transition:
+      background-color 0.3s ease,
+      border-color 0.3s ease,
+      color 0.3s ease,
+      fill 0.3s ease,
+      stroke 0.3s ease,
+      box-shadow 0.3s ease !important;
+  }
+}
+
+/*
+ * Toasts (components/common/Toast): they slide in from the right edge, and slide back out while fading; the stack
+ * then closes the gap (the grid row of a leaving toast shrinks to nothing). For people who asked for less motion,
+ * they only fade. The countdown bar empties over the toast's own time (its duration is set inline) and stops while
+ * the toast is pointed at or focused, together with the timer.
+ */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 1.5rem));
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(100% + 1.5rem));
+  }
+}
+
+@keyframes toast-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes toast-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes toast-countdown {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toast-enter {
+  animation: toast-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.toast-leave {
+  animation: toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter {
+    animation: toast-fade-in 0.2s ease-out both;
+  }
+
+  .toast-leave {
+    animation: toast-fade-out 0.2s ease-in both;
+  }
+}
+
+.toast-countdown {
+  transform-origin: left;
+  animation-name: toast-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+/*
+ * The live map of an order (Leaflet, components/business/LiveTracking). Its zoom buttons and credit line follow the
+ * theme; Leaflet's own grey background becomes the page colour while tiles load. In dark mode only the tiles are
+ * darkened (OpenStreetMap publishes light tiles only): the route and the markers keep their colours.
+ */
+.tracking-map .leaflet-container {
+  background: var(--color-page);
+  font-family: inherit;
+}
+
+.tracking-map .leaflet-container .leaflet-bar {
+  border: 1px solid var(--color-line);
+  border-radius: 0.875rem;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.tracking-map .leaflet-container .leaflet-bar a {
+  width: 2.25rem;
+  height: 2.25rem;
+  line-height: 2.25rem;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border-bottom-color: var(--color-line);
+}
+
+.tracking-map .leaflet-container .leaflet-bar a:hover,
+.tracking-map .leaflet-container .leaflet-bar a:focus-visible {
+  background: var(--color-brand-50);
+  color: var(--color-brand-text-strong);
+}
+
+.tracking-map .leaflet-container .leaflet-control-attribution {
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  color: var(--color-ink-soft);
+}
+
+.tracking-map .leaflet-container .leaflet-control-attribution a {
+  color: var(--color-brand-text);
+}
+
+:root[data-theme='dark'] .tracking-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
+}

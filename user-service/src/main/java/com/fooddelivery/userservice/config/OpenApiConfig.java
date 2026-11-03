@@ -1,0 +1,46 @@
+package com.fooddelivery.userservice.config;
+
+import java.util.Arrays;
+
+import com.fooddelivery.userservice.web.CallerInfo;
+import io.swagger.v3.oas.models.Components;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
+import org.springdoc.core.utils.SpringDocUtils;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+/** Swagger UI: http://localhost:8081/swagger-ui.html */
+@Configuration
+public class OpenApiConfig {
+
+    /** The access token of a sign-in (user-service /api/v1/auth/login), sent as Authorization: Bearer */
+    private static final String BEARER = "bearer-token";
+
+    static {
+        // CallerInfo is resolved from the access token, not from parameters: hide it from the docs.
+        SpringDocUtils.getConfig().addRequestWrapperToIgnore(CallerInfo.class);
+    }
+
+    @Bean
+    public OpenAPI userServiceOpenApi() {
+        return new OpenAPI()
+                .components(new Components().addSecuritySchemes(BEARER, new SecurityScheme()
+                        .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")))
+                .addSecurityItem(new SecurityRequirement().addList(BEARER))
+                .info(new Info()
+                .title("User Service API")
+                .version("v1")
+                .description("Registration, login, profiles, addresses and admin user management. "
+                        + "Send the access token of a sign-in: the Authorize button, Bearer token."));
+    }
+
+    private static boolean isAdminController(Class<?> controllerType) {
+        RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(controllerType, RequestMapping.class);
+        return mapping != null && Arrays.stream(mapping.path()).anyMatch(path -> path.startsWith("/api/v1/admin"));
+    }
+}

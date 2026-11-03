@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "DeliveryPartnerStatusChanged",
+  "namespace": "com.fooddelivery.events.delivery",
+  "doc": "Added in 1.7.0. What a delivery partner is doing changed: went online or offline, got a delivery (BUSY), finished it, or was suspended. delivery-service decides this together with the deliveries (assignment). Producer: delivery-service. Consumer: delivery-partner-service (shows the partner's current status). Topic: fooddelivery.delivery.partner-status-changed (key: partnerUserId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "partnerUserId", "type": "long" },
+    { "name": "version", "type": "long", "doc": "Version of delivery-service's partner record after the change: consumers ignore events older than the copy they have" },
+    { "name": "status", "type": "string", "doc": "OFFLINE, AVAILABLE, BUSY or SUSPENDED (string: new statuses must not break consumers)" },
+    { "name": "statusReason", "type": ["null", "string"], "default": null, "doc": "Why, when the system or an admin decided (e.g. an offer not answered in time)" },
+    { "name": "currentDeliveryId", "type": ["null", "long"], "default": null, "doc": "The delivery the partner is on (BUSY only)" },
+    { "name": "availableSince", "type": ["null", { "type": "long", "logicalType": "timestamp-millis" }], "default": null, "doc": "When the partner last became available (queue order)" },
+    { "name": "completedDeliveries", "type": "int" }
+  ]
+}

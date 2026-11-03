@@ -1,0 +1,331 @@
+### Food Delivery Platform - Restaurant Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Run the requests from top to bottom. Needs user-service + restaurant-service (+ gateway).
+###
+### The caller is identified by the access token of a sign-in below (Authorization: Bearer); its role must be
+###   RESTAURANT_ADMIN for /restaurants/mine/**, PLATFORM_ADMIN for /admin/**
+
+# Everything through the API Gateway:
+@gateway = http://localhost:8080
+# The services' shared secret of the internal APIs: the dev profile's value (INTERNAL_SERVICE_TOKEN elsewhere)
+@internalServiceToken = dev-internal-service-token
+# Or call restaurant-service directly (user-service calls still need the gateway or port 8081):
+# @gateway = http://localhost:8082
+
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+# Change before step 1 if this owner already exists (409 Conflict)
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@restaurantId = {{submitRestaurant.response.body.$.id}}
+@version = {{myRestaurant.response.body.$.version}}
+
+
+### ======================== OWNER ACCOUNT (user-service) ========================
+
+### 1. Register as a restaurant owner
+POST {{gateway}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{ownerEmail}}",
+  "password": "{{ownerPassword}}",
+  "fullName": "Arjun Mehta",
+  "phone": "+919811112222",
+  "role": "RESTAURANT_ADMIN"
+}
+
+### 2. Log in as the owner -> ownerToken
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{ownerEmail}}",
+  "password": "{{ownerPassword}}"
+}
+
+
+### ============================ OWNER: ONBOARDING ============================
+
+### 3. Submit a restaurant (201, status PENDING) -> restaurantId
+# @name submitRestaurant
+POST {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "Spice Hub",
+  "description": "Hyderabadi biryani and kebabs",
+  "cuisines": ["Biryani", "North Indian"],
+  "phone": "+919876543210",
+  "email": "contact@spicehub.example.com",
+  "address": {
+    "line1": "45 Brigade Road",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "postalCode": "560025",
+    "country": "India",
+    "latitude": 12.971600,
+    "longitude": 77.607300
+  },
+  "timeZone": "Asia/Kolkata",
+  "legalBusinessName": "Spice Hub Foods Pvt Ltd",
+  "taxRegistrationNumber": "29ABCDE1234F1Z5",
+  "foodLicenseNumber": "11223344556677",
+  "documents": [
+    { "type": "FOOD_LICENSE", "url": "https://docs.example.com/spice-hub/fssai.pdf" },
+    { "type": "TAX_REGISTRATION", "url": "https://docs.example.com/spice-hub/gst.pdf" }
+  ],
+  "operatingHours": [
+    { "dayOfWeek": "MONDAY",    "opensAt": "11:00", "closesAt": "15:00" },
+    { "dayOfWeek": "MONDAY",    "opensAt": "18:00", "closesAt": "23:00" },
+    { "dayOfWeek": "TUESDAY",   "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "WEDNESDAY", "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "THURSDAY",  "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "FRIDAY",    "opensAt": "11:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SATURDAY",  "opensAt": "10:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SUNDAY",    "opensAt": "10:00", "closesAt": "23:00" }
+  ]
+}
+
+### 4. Business rule example: overlapping hours (422)
+POST {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "Overlap Cafe",
+  "cuisines": ["Cafe"],
+  "phone": "+919876543211",
+  "email": "hello@overlap.example.com",
+  "address": { "line1": "1 Test Street", "city": "Bengaluru", "state": "Karnataka", "postalCode": "560001", "country": "India" },
+  "legalBusinessName": "Overlap Cafe LLP",
+  "foodLicenseNumber": "99887766554433",
+  "documents": [ { "type": "FOOD_LICENSE", "url": "https://docs.example.com/overlap/fssai.pdf" } ],
+  "operatingHours": [
+    { "dayOfWeek": "MONDAY", "opensAt": "09:00", "closesAt": "14:00" },
+    { "dayOfWeek": "MONDAY", "opensAt": "13:00", "closesAt": "18:00" }
+  ]
+}
+
+### 5. List my restaurants (all statuses)
+GET {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+
+### 6. My restaurant: status, review reason and current version -> version
+# @name myRestaurant
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}
+Authorization: Bearer {{ownerToken}}
+
+### 7. Not visible to customers while PENDING (404)
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}
+
+
+### =========================== ADMIN: REVIEW ===========================
+
+### 8. Log in as the platform admin -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+### 9. Pending approvals, oldest first
+GET {{gateway}}/api/v1/admin/restaurants?status=PENDING&sort=createdAt,asc
+Authorization: Bearer {{adminToken}}
+
+### 10. Review details: business info, documents, hours + owner (fetched from user-service)
+GET {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}
+Authorization: Bearer {{adminToken}}
+
+### 11. Reject with a reason the owner will see
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/reject
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Food license document is unreadable. Please upload a clearer scan."
+}
+
+
+### ===================== OWNER: FIX AND RESUBMIT =====================
+
+### 12. Owner reads the rejection reason (run step 6 again to refresh the version)
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}
+Authorization: Bearer {{ownerToken}}
+
+### 13. Owner uploads a new document link. Run step 6 first so {{version}} is current.
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "version": {{version}},
+  "name": "Spice Hub",
+  "description": "Hyderabadi biryani and kebabs",
+  "cuisines": ["Biryani", "North Indian"],
+  "phone": "+919876543210",
+  "email": "contact@spicehub.example.com",
+  "address": { "line1": "45 Brigade Road", "city": "Bengaluru", "state": "Karnataka", "postalCode": "560025", "country": "India" },
+  "timeZone": "Asia/Kolkata",
+  "legalBusinessName": "Spice Hub Foods Pvt Ltd",
+  "taxRegistrationNumber": "29ABCDE1234F1Z5",
+  "foodLicenseNumber": "11223344556677",
+  "documents": [
+    { "type": "FOOD_LICENSE", "url": "https://docs.example.com/spice-hub/fssai-clear-scan.pdf" },
+    { "type": "TAX_REGISTRATION", "url": "https://docs.example.com/spice-hub/gst.pdf" }
+  ],
+  "operatingHours": [
+    { "dayOfWeek": "MONDAY",    "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "TUESDAY",   "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "WEDNESDAY", "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "THURSDAY",  "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "FRIDAY",    "opensAt": "11:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SATURDAY",  "opensAt": "10:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SUNDAY",    "opensAt": "10:00", "closesAt": "23:00" }
+  ]
+}
+
+### 14. Send it for review again (REJECTED -> PENDING)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/resubmit
+Authorization: Bearer {{ownerToken}}
+
+
+### ======================= ADMIN: APPROVE AND GO LIVE =======================
+
+### 15. Approve (PENDING -> APPROVED)
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "License and tax documents verified"
+}
+
+### 16. Activate (APPROVED -> ACTIVE): customers can now see it
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Menu and payout details ready"
+}
+
+
+### ============================ CUSTOMERS ============================
+
+### 17. Browse active restaurants in a city, by cuisine
+GET {{gateway}}/api/v1/restaurants?city=Bengaluru&cuisine=biryani&page=0&size=20&sort=name,asc
+
+### 18. Restaurant page: hours and whether it is open now (no business data)
+###     Cached in Redis (Phase 12) until the restaurant changes; "openNow" is worked out on every request.
+###     See the cached copy: docker exec -it fd-redis redis-cli --scan --pattern "restaurant:v1:details:*"
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}
+
+
+### ======================= OWNER: OPENING HOURS =======================
+
+### 19-20. Run step 6 again first (refreshes {{version}}), then replace the weekly schedule (closed on Mondays now)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/operating-hours
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "version": {{version}},
+  "operatingHours": [
+    { "dayOfWeek": "TUESDAY",   "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "WEDNESDAY", "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "THURSDAY",  "opensAt": "11:00", "closesAt": "23:00" },
+    { "dayOfWeek": "FRIDAY",    "opensAt": "11:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SATURDAY",  "opensAt": "10:00", "closesAt": "23:30" },
+    { "dayOfWeek": "SUNDAY",    "opensAt": "10:00", "closesAt": "23:00" }
+  ]
+}
+
+### 21. Same request again with the old version: 409 (optimistic locking)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/operating-hours
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "version": {{version}},
+  "operatingHours": [
+    { "dayOfWeek": "SUNDAY", "opensAt": "10:00", "closesAt": "22:00" }
+  ]
+}
+
+
+### ======================== ADMIN: CONTROL ========================
+
+### 22. Suspend (policy violation): hidden from customers
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/suspend
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Repeated hygiene complaints - under investigation"
+}
+
+### 23. Reinstate (SUSPENDED -> ACTIVE)
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Inspection passed"
+}
+
+### 24. Invalid transition example: approve an ACTIVE restaurant (409)
+PUT {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Testing the state machine"
+}
+
+### 25. Audit history (newest first)
+GET {{gateway}}/api/v1/admin/restaurants/{{restaurantId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+### 26. Identity headers without a token name nobody (the gateway removes them): 401
+GET {{gateway}}/api/v1/restaurants/mine
+X-User-Id: 999
+X-User-Role: RESTAURANT_ADMIN
+
+
+### ======================= EVENTS (Kafka, Phases 7-8) =======================
+### Every change writes RestaurantChanged (topic fooddelivery.restaurant.changed, key = restaurantId) to the
+### transactional outbox: SUBMITTED, PROFILE_UPDATED (details or opening hours) and STATUS_CHANGED (admin
+### decisions, resubmit). Each event carries the restaurant's new version; catalog-service keeps a copy.
+### Messages: Kafka UI http://localhost:8090
+
+### RestaurantChanged schema in Schema Registry
+GET http://localhost:8091/subjects/fooddelivery.restaurant.changed-value/versions/latest
+
+### Internal API (other services, not routed by the gateway): now includes the version
+GET http://localhost:8082/api/v1/internal/restaurants/{{restaurantId}}
+X-Service-Token: {{internalServiceToken}}
+
+### Since Phase 11 the event also carries description and cuisines (for search). To fill or rebuild the search
+### index with every restaurant already in MySQL, replay the current state as REPUBLISHED events
+### (audited, changes no data; consumers ignore versions they already have):
+POST {{gateway}}/api/v1/admin/restaurants/events/republish
+Authorization: Bearer {{adminToken}}
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8082/actuator/health
+
+### Swagger UI: http://localhost:8082/swagger-ui.html
+GET http://localhost:8082/v3/api-docs

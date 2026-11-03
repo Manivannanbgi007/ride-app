@@ -1,0 +1,103 @@
+### Food Delivery Platform - Search Service
+### Written for the VS Code "REST Client" extension.
+### Search is public: no identity headers needed (only the admin overview needs X-User-Role: PLATFORM_ADMIN).
+###
+### What is searchable comes from Kafka events (RestaurantChanged, CategoryChanged, MenuItemChanged), indexed
+### into Elasticsearch (indexes: restaurant, food, category). MySQL in restaurant- and catalog-service stays the
+### source of truth. Data created before Phase 11 is not in Kafka: run the REINDEX section once to fill the indexes.
+###
+### Prerequisites: run restaurant-service.http and catalog-service.http first (an ACTIVE restaurant in Bengaluru
+### with a menu).
+
+@gateway = http://localhost:8080
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+@adminId = {{adminLogin.response.body.$.userId}}
+
+
+### ============================ REINDEX (once) ============================
+
+### 1. Admin login -> adminId
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 2. Replay every restaurant, category and menu item as events (run all three; audited, changes no data)
+POST {{gateway}}/api/v1/admin/restaurants/events/republish
+X-User-Id: {{adminId}}
+X-User-Role: PLATFORM_ADMIN
+
+###
+POST {{gateway}}/api/v1/admin/categories/events/republish
+X-User-Id: {{adminId}}
+X-User-Role: PLATFORM_ADMIN
+
+###
+POST {{gateway}}/api/v1/admin/menu-items/events/republish
+X-User-Id: {{adminId}}
+X-User-Role: PLATFORM_ADMIN
+
+### 3. A few seconds later: how much is indexed, and is Elasticsearch healthy
+GET {{gateway}}/api/v1/admin/search/indexes
+X-User-Id: {{adminId}}
+X-User-Role: PLATFORM_ADMIN
+
+
+### ============================ RESTAURANTS ============================
+
+### 4. Words in name, cuisines and description; typos are fine ("biryni")
+GET {{gateway}}/api/v1/search/restaurants?q=biryni&city=Bengaluru
+
+### 5. All restaurants of a city by name, with the cuisines facet (counts per cuisine)
+GET {{gateway}}/api/v1/search/restaurants?city=bengaluru
+
+### 6. One cuisine (any letter case)
+GET {{gateway}}/api/v1/search/restaurants?cuisine=north indian
+
+### 7. Near me: nearest first, with distanceKm (restaurants need coordinates in their address)
+GET {{gateway}}/api/v1/search/restaurants?lat=12.9716&lon=77.5946&radiusKm=10
+
+
+### ============================ DISHES ============================
+
+### 8. Dishes across all restaurants that can be ordered now (listed, in stock, restaurant ACTIVE)
+###    Facets: foodTypes and categories with counts
+GET {{gateway}}/api/v1/search/foods?q=chicken biryani&city=Bengaluru
+
+### 9. Vegetarian, under 250, cheapest first
+GET {{gateway}}/api/v1/search/foods?foodType=VEG&maxPrice=250&sort=PRICE_LOW_TO_HIGH
+
+### 10. One restaurant's dishes in one category
+GET {{gateway}}/api/v1/search/foods?restaurantId=1&categoryId=3
+
+
+### ====================== CATEGORIES AND AUTOCOMPLETE ======================
+
+### 11. Every active category in menu order, or the ones matching words
+GET {{gateway}}/api/v1/search/categories
+
+###
+GET {{gateway}}/api/v1/search/categories?q=sweets
+
+### 12. Search as you type: word beginnings ("chi bir" -> "Chicken Biryani"), up to 5 of each kind
+GET {{gateway}}/api/v1/search/suggest?q=chi bir&city=Bengaluru
+
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8088/actuator/health
+
+### Elasticsearch itself (direct): cluster health, indexes, the food mapping
+GET http://localhost:9200/_cluster/health
+
+###
+GET http://localhost:9200/_cat/indices?v
+
+###
+GET http://localhost:9200/food/_mapping
+
+### Swagger UI: http://localhost:8088/swagger-ui.html
+GET http://localhost:8088/v3/api-docs

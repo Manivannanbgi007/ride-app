@@ -1,0 +1,15 @@
+package com.fooddelivery.searchservice.dto.response;
+
+import java.util.List;
+
+/** @param distanceKm from the position sent with the search (null without one, or for a restaurant without coordinates) */
+public record RestaurantHit(
+        Long id,
+        String name,
+        String description,
+        List<String> cuisines,
+        String city,
+        String addressLine,
+        Double distanceKm
+) {
+}

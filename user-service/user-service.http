@@ -1,0 +1,293 @@
+### Food Delivery Platform - User Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Run the requests from top to bottom: 1 -> 2 -> 3 ...
+###
+### Login returns an access token (JWT). Every other call sends it (Authorization: Bearer), and only the token says
+### who the caller is (the admin APIs require the role PLATFORM_ADMIN).
+
+# Direct to the service:
+@baseUrl = http://localhost:8081
+# Or through the API Gateway (same paths):
+# @baseUrl = http://localhost:8080
+
+# Bootstrap admin from your .env file (BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD)
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+# Change this before step 1 if the customer already exists (409 Conflict)
+@customerEmail = priya.sharma@example.com
+@customerPassword = Priya1234
+
+@customerId = {{customerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminId = {{adminLogin.response.body.$.userId}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@addressId = {{addAddress.response.body.$.id}}
+
+
+### ============================ AUTH ============================
+
+### 1. Register a customer (201)
+POST {{baseUrl}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{customerEmail}}",
+  "password": "{{customerPassword}}",
+  "fullName": "Priya Sharma",
+  "phone": "+919876543210"
+}
+
+### 2. Log in as the customer (200) -> customerId, accessToken, and the cookie fd_refresh_customer
+###    "role" is optional: with it, another kind of account gets 403 WRONG_ACCOUNT_TYPE
+# @name customerLogin
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{customerEmail}}",
+  "password": "{{customerPassword}}",
+  "role": "CUSTOMER"
+}
+
+### 2a. New access token from the refresh cookie (REST Client keeps cookies between requests) -> 200 and a new cookie
+POST {{baseUrl}}/api/v1/auth/refresh
+Content-Type: application/json
+
+{ "role": "CUSTOMER" }
+
+### 2b. The public key services use to check access tokens (user-service only; not routed by the gateway)
+GET http://localhost:8081/.well-known/jwks.json
+
+### 2c. Sign out of the customer area (204, cookie removed); a refresh afterwards answers 401
+POST {{baseUrl}}/api/v1/auth/logout
+Content-Type: application/json
+
+{ "role": "CUSTOMER" }
+
+### 3. Register a restaurant owner (role chosen at sign-up)
+POST {{baseUrl}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "owner.spicehub@example.com",
+  "password": "Owner1234",
+  "fullName": "Arjun Mehta",
+  "role": "RESTAURANT_ADMIN"
+}
+
+### 4. Validation error example (400 with field errors)
+POST {{baseUrl}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "not-an-email",
+  "password": "short",
+  "fullName": ""
+}
+
+### 5. Wrong password (401)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{customerEmail}}",
+  "password": "WrongPass1"
+}
+
+
+### ========================= MY PROFILE =========================
+
+### 6. Get my profile
+GET {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{customerToken}}
+
+### 7. Update my profile
+PUT {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "fullName": "Priya S. Sharma",
+  "phone": "+919876543210"
+}
+
+### 8. Change my password (204)
+PUT {{baseUrl}}/api/v1/users/me/password
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currentPassword": "{{customerPassword}}",
+  "newPassword": "{{customerPassword}}x"
+}
+
+### 9. Change it back (so step 2 keeps working)
+PUT {{baseUrl}}/api/v1/users/me/password
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "currentPassword": "{{customerPassword}}x",
+  "newPassword": "{{customerPassword}}"
+}
+
+
+### ========================= MY ADDRESSES =========================
+
+### 10. Add an address (the first one becomes the default) -> addressId
+# @name addAddress
+POST {{baseUrl}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "type": "HOME",
+  "line1": "12 MG Road",
+  "line2": "Near Metro Station",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "postalCode": "560001",
+  "country": "India",
+  "latitude": 12.975400,
+  "longitude": 77.606800
+}
+
+### 11. Add a work address and make it the default
+POST {{baseUrl}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "type": "WORK",
+  "line1": "Tech Park, Tower B",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "postalCode": "560103",
+  "country": "India",
+  "makeDefault": true
+}
+
+### 12. List my addresses (default first)
+GET {{baseUrl}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+
+### 13. Update the home address
+PUT {{baseUrl}}/api/v1/users/me/addresses/{{addressId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "type": "HOME",
+  "line1": "14 MG Road",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "postalCode": "560001",
+  "country": "India"
+}
+
+### 14. Make the home address the default again
+PUT {{baseUrl}}/api/v1/users/me/addresses/{{addressId}}/default
+Authorization: Bearer {{customerToken}}
+
+
+### ========================= ADMIN: USERS =========================
+
+### 15. Log in as the platform admin -> adminId
+# @name adminLogin
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+### 16. List users (paged, newest first)
+GET {{baseUrl}}/api/v1/admin/users?page=0&size=20&sort=createdAt,desc
+Authorization: Bearer {{adminToken}}
+
+### 17. Search + filter: active customers matching "priya"
+GET {{baseUrl}}/api/v1/admin/users?search=priya&role=CUSTOMER&status=ACTIVE
+Authorization: Bearer {{adminToken}}
+
+### 18. User details (created date, last login, address count)
+GET {{baseUrl}}/api/v1/admin/users/{{customerId}}
+Authorization: Bearer {{adminToken}}
+
+### 19. Deactivate the customer (reason is required)
+PUT {{baseUrl}}/api/v1/admin/users/{{customerId}}/deactivate
+Authorization: Bearer {{adminToken}}
+X-Request-Id: demo-deactivate-001
+Content-Type: application/json
+
+{
+  "reason": "Multiple chargebacks reported"
+}
+
+### 20. The deactivated customer cannot log in now (403)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{customerEmail}}",
+  "password": "{{customerPassword}}"
+}
+
+### 21. Activate the customer again
+PUT {{baseUrl}}/api/v1/admin/users/{{customerId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Chargebacks resolved with the bank"
+}
+
+### 22. Change the customer's role
+PUT {{baseUrl}}/api/v1/admin/users/{{customerId}}/role
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "role": "DELIVERY_PARTNER",
+  "reason": "Customer joined as a delivery partner"
+}
+
+### 23. Audit history of the customer (newest first)
+GET {{baseUrl}}/api/v1/admin/users/{{customerId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+### 24. A customer calling an admin API (403)
+GET {{baseUrl}}/api/v1/admin/users
+Authorization: Bearer {{customerToken}}
+
+### 25. Admin trying to deactivate themselves (422)
+PUT {{baseUrl}}/api/v1/admin/users/{{adminId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Testing the safety rule"
+}
+
+
+### ======================= EVENTS (Kafka, Phases 7-8) =======================
+### Every successful registration writes UserRegistered (topic fooddelivery.user.registered, key = userId)
+### to the transactional outbox, in the same transaction as the new user; the outbox relay publishes it.
+### Kafka down? Registration still works; the event waits in outbox_events and is sent when Kafka is back.
+### Messages: Kafka UI http://localhost:8090
+
+### UserRegistered schema in Schema Registry
+GET http://localhost:8091/subjects/fooddelivery.user.registered-value/versions/latest
+
+### All registered schemas
+GET http://localhost:8091/subjects
+
+### ========================= OPERATIONS =========================
+
+### Health
+GET {{baseUrl}}/actuator/health
+
+### OpenAPI document (Swagger UI: http://localhost:8081/swagger-ui.html)
+GET {{baseUrl}}/v3/api-docs

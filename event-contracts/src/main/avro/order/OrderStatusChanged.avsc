@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "OrderStatusChanged",
+  "namespace": "com.fooddelivery.events.order",
+  "doc": "An order entered a new status (the full order lifecycle, including the first status). Cancellations also publish OrderCancelled, which carries the reason and the payment state. Producer: order-service. Topic: fooddelivery.order.status-changed (key: orderId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "orderId", "type": "long" },
+    { "name": "customerId", "type": "long" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "restaurantName", "type": "string" },
+    { "name": "status", "type": "string", "doc": "PAYMENT_PENDING, PLACED, ACCEPTED, PREPARING, READY_FOR_PICKUP, OUT_FOR_DELIVERY, DELIVERED, CANCELLED or REJECTED (string: new statuses must not break consumers)" },
+    { "name": "previousStatus", "type": ["null", "string"], "default": null, "doc": "Null for the order's first status" },
+    { "name": "changedBy", "type": "string", "doc": "CUSTOMER, RESTAURANT, ADMIN or SYSTEM" },
+    { "name": "note", "type": ["null", "string"], "default": null }
+  ]
+}

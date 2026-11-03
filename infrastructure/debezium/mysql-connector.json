@@ -1,0 +1,38 @@
+{
+  "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+  "tasks.max": "1",
+
+  "database.hostname": "mysql",
+  "database.port": "3306",
+  "database.user": "debezium",
+  "database.password": "${DEBEZIUM_DB_PASSWORD}",
+  "database.server.id": "5400",
+  "database.connectionTimeZone": "UTC",
+
+  "topic.prefix": "fdcdc",
+  "database.include.list": "restaurant_db,catalog_db",
+  "table.include.list": "restaurant_db.restaurants,catalog_db.categories,catalog_db.menu_items",
+
+  "snapshot.mode": "initial",
+  "snapshot.locking.mode": "minimal",
+  "decimal.handling.mode": "string",
+  "time.precision.mode": "connect",
+  "include.schema.changes": "false",
+  "tombstones.on.delete": "true",
+
+  "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
+  "schema.history.internal.kafka.topic": "fdcdc.schema-history",
+  "schema.history.internal.store.only.captured.tables.ddl": "true",
+
+  "heartbeat.interval.ms": "10000",
+
+  "topic.creation.default.replication.factor": "1",
+  "topic.creation.default.partitions": "3",
+  "topic.creation.default.cleanup.policy": "delete",
+  "topic.creation.default.retention.ms": "604800000",
+
+  "errors.max.retries": "-1",
+  "errors.retry.delay.max.ms": "60000",
+  "max.queue.size": "8192",
+  "max.batch.size": "2048"
+}

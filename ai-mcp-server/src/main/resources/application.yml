@@ -1,0 +1,134 @@
+server:
+  port: ${SERVER_PORT:8098}
+
+spring:
+  application:
+    name: ai-mcp-server
+  profiles:
+    default: dev
+
+  # Local runs: read variables from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  # Proposals (order confirmations, 10 minutes). Short timeouts: when Redis is down, only prepare_order is affected.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 500ms
+      timeout: 1s
+
+  ai:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:qwen3:4b-instruct-2507-q4_K_M}
+          # Low temperature: tool choice and numbers should be repeatable, not creative
+          temperature: 0.1
+          num-ctx: 8192
+          # The model stays loaded in memory between questions (loading takes a long time on a CPU)
+          keep-alive: 30m
+    # The agent does its own single retry for empty answers; do not let the client wait through long back-offs
+    retry:
+      max-attempts: 1
+    mcp:
+      server:
+        name: food-delivery-assistant
+        version: 1.0.0
+        type: SYNC
+        protocol: STREAMABLE
+        # Longer than the slowest tool (prepare_order)
+        request-timeout: 60s
+        streamable-http:
+          mcp-endpoint: /mcp
+
+app:
+  # Shared secret of every /internal and /mcp call (X-Service-Token). No default here: see the profile files.
+  service-token: ${AI_SERVICE_TOKEN:}
+  # "Today" for the assistant and the date arguments of the tools
+  timezone: ${APP_TIMEZONE:Asia/Kolkata}
+  # Who is asking: the access token of the caller, signed by user-service (its public key is fetched from there and
+  # cached). The issuer and audience must be the platform's (see user-service app.jwt).
+  jwt:
+    jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+    issuer: ${JWT_ISSUER:https://auth.fooddelivery.local}
+    audience: ${JWT_AUDIENCE:food-delivery-api}
+  # The only place the business APIs are called through
+  gateway:
+    base-url: ${GATEWAY_URL:http://localhost:8080}
+    connect-timeout: 2s
+    read-timeout: 4s
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    model: ${OLLAMA_MODEL:qwen3:4b-instruct-2507-q4_K_M}
+    # A CPU-only model needs a long time for one answer
+    request-timeout: ${OLLAMA_REQUEST_TIMEOUT:120s}
+    status-timeout: 3s
+  agent:
+    max-tool-calls: 6
+    max-duration: ${AGENT_MAX_DURATION:150s}
+    tool-timeout: 5s
+    max-history: 12
+    max-history-chars: 6000
+    max-tool-result-chars: 6000
+  proposal:
+    ttl: 10m
+    # The proposal key lives a little longer than its expiry so a late Confirm gets "expired" (410), not "not found"
+    keep-after-expiry: 5m
+    # A confirmed or cancelled proposal is kept so a repeated Confirm returns the same order
+    confirmed-keep: 24h
+    lock-ttl: 60s
+
+management:
+  # Observability: metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        ai.agent.duration: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+  # Readiness must not depend on Ollama (a model that is still downloading must not take the service out of rotation):
+  # the assistant reports it through /internal/agent/status. Redis only affects order proposals.
+  health:
+    redis:
+      enabled: false
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: AI MCP Server (agent and tools)
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user= (empty ones are left out).
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} ){'[a-zA-Z]+= ', ''}"

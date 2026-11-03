@@ -1,0 +1,148 @@
+package com.fooddelivery.searchservice.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.fooddelivery.searchservice.TestcontainersConfiguration;
+import com.fooddelivery.searchservice.document.FoodDocument;
+import com.fooddelivery.searchservice.document.RestaurantDocument;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.IndexOperations;
+import org.springframework.data.elasticsearch.core.document.Document;
+import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
+import org.springframework.data.elasticsearch.core.query.IndexQuery;
+import org.springframework.data.elasticsearch.core.query.IndexQueryBuilder;
+import org.springframework.test.context.ActiveProfiles;
+
+/**
+ * An index created before ratings existed (strict mapping, no rating fields, documents in it) gets the new fields
+ * without being recreated: its documents stay, read as "no ratings", and can then be given one. The test builds such an
+ * index under its own name, so the real indexes are not touched.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Import(TestcontainersConfiguration.class)
+@ActiveProfiles("test")
+class SearchIndexesMappingIntegrationTest {
+
+    private static final String LEGACY = "legacy-restaurant-before-ratings";
+
+    @Autowired
+    private ElasticsearchOperations operations;
+    @Autowired
+    private SearchIndexes searchIndexes;
+
+    private IndexOperations legacy;
+
+    @BeforeEach
+    void anIndexAsItWasBeforeRatings() throws IOException {
+        legacy = operations.indexOps(IndexCoordinates.of(LEGACY));
+        if (legacy.exists()) {
+            legacy.delete();
+        }
+        Map<String, Object> mapping = new LinkedHashMap<>(Document.parse(resource("elasticsearch/restaurant-mapping.json")));
+        Map<String, Object> properties = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> property : ((Map<?, ?>) mapping.get("properties")).entrySet()) {
+            properties.put(String.valueOf(property.getKey()), property.getValue());
+        }
+        properties.remove("ratingAverage");
+        properties.remove("ratingCount");
+        mapping.put("properties", properties);
+        legacy.create(Document.parse(resource("elasticsearch/settings.json")), Document.from(mapping));
+
+        String source = """
+                {"id":7,"name":"Old Kitchen","description":"indexed long ago","cuisines":["Test"],"city":"Oldtown",
+                 "status":"ACTIVE","sourceVersion":3,"indexedAt":"2026-01-01T00:00:00.000Z"}
+                """;
+        IndexQuery query = new IndexQueryBuilder().withId("7").withSource(source).build();
+        operations.index(query, IndexCoordinates.of(LEGACY));
+        legacy.refresh();
+    }
+
+    @AfterEach
+    void dropTheLegacyIndex() {
+        legacy.delete();
+    }
+
+    @Test
+    void theRatingFieldsAreAddedToAnExistingIndexAndItsDocumentsStay() {
+        // The mapping is strict: before the step, a document with a rating is refused
+        RestaurantDocument rated = restaurant(8, 4.5, 12);
+        assertThatThrownBy(() -> operations.save(rated, IndexCoordinates.of(LEGACY))).isInstanceOf(Exception.class);
+
+        List<String> added = searchIndexes.addMissingFields(legacy, RestaurantDocument.class);
+
+        assertThat(added).containsExactlyInAnyOrder("ratingAverage", "ratingCount");
+        Map<?, ?> properties = (Map<?, ?>) legacy.getMapping().get("properties");
+        assertThat(properties.keySet().stream().map(String::valueOf).toList()).contains("ratingAverage", "ratingCount", "name", "location", "sourceVersion");
+        assertThat(((Map<?, ?>) properties.get("ratingAverage")).get("type")).isEqualTo("double");
+        assertThat(((Map<?, ?>) properties.get("ratingCount")).get("type")).isEqualTo("integer");
+        // The document that was there is still there, unchanged, and reads as "no ratings"
+        RestaurantDocument old = operations.get("7", RestaurantDocument.class, IndexCoordinates.of(LEGACY));
+        assertThat(old).isNotNull();
+        assertThat(old.getName()).isEqualTo("Old Kitchen");
+        assertThat(old.getSourceVersion()).isEqualTo(3L);
+        assertThat(old.getRatingAverage()).isNull();
+        assertThat(old.getRatingCount()).isZero();
+        // And a rating can be written now
+        operations.save(rated, IndexCoordinates.of(LEGACY));
+        RestaurantDocument stored = operations.get("8", RestaurantDocument.class, IndexCoordinates.of(LEGACY));
+        assertThat(stored.getRatingAverage()).isEqualTo(4.5);
+        assertThat(stored.getRatingCount()).isEqualTo(12);
+        legacy.refresh();
+        assertThat(operations.count(org.springframework.data.elasticsearch.core.query.Query.findAll(),
+                IndexCoordinates.of(LEGACY))).isEqualTo(2);
+    }
+
+    @Test
+    void runningItAgainChangesNothing() {
+        searchIndexes.addMissingFields(legacy, RestaurantDocument.class);
+
+        assertThat(searchIndexes.addMissingFields(legacy, RestaurantDocument.class)).isEmpty();
+    }
+
+    @Test
+    void theRealIndexesAreAlreadyCompleteAndStartingAgainIsHarmless() {
+        searchIndexes.afterPropertiesSet();
+
+        assertThat(searchIndexes.addMissingFields(operations.indexOps(RestaurantDocument.class), RestaurantDocument.class))
+                .isEmpty();
+        assertThat(searchIndexes.addMissingFields(operations.indexOps(FoodDocument.class), FoodDocument.class)).isEmpty();
+    }
+
+    private static RestaurantDocument restaurant(long id, Double average, int count) {
+        RestaurantDocument document = new RestaurantDocument();
+        document.setId(id);
+        document.setName("Rated Kitchen");
+        document.setCity("Oldtown");
+        document.setCuisines(List.of("Test"));
+        document.setStatus("ACTIVE");
+        document.setSourceVersion(1L);
+        document.setIndexedAt(Instant.now());
+        document.setRatingAverage(average);
+        document.setRatingCount(count);
+        return document;
+    }
+
+    private static String resource(String path) throws IOException {
+        try (InputStream in = new ClassPathResource(path).getInputStream()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+}

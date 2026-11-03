@@ -1,0 +1,16 @@
+# Integration tests: Testcontainers provides MySQL; order-service and catalog-service are replaced by mocks
+# (@MockitoBean on OrderLookup and MenuItemLookup), so nothing is called over HTTP.
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP headers).
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

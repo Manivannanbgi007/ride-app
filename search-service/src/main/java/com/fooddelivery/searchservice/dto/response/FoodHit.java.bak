@@ -1,0 +1,19 @@
+package com.fooddelivery.searchservice.dto.response;
+
+import java.math.BigDecimal;
+
+/** A dish with what a result list shows of its restaurant and category. */
+public record FoodHit(
+        Long id,
+        String name,
+        String description,
+        BigDecimal price,
+        String foodType,
+        String imageUrl,
+        Long categoryId,
+        String categoryName,
+        Long restaurantId,
+        String restaurantName,
+        String restaurantCity
+) {
+}

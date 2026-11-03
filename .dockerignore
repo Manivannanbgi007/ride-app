@@ -1,0 +1,15 @@
+# Build context for services built from the repository root (see docker-compose.yml).
+# Keep the context small: only pom files and sources are needed.
+**/target/
+**/.mvn/
+**/mvnw
+**/mvnw.cmd
+**/*.http
+**/.idea/
+**/*.iml
+**/.vscode/
+**/node_modules/
+.git/
+.env
+infrastructure/
+api-gateway/

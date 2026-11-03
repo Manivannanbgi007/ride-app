@@ -1,0 +1,1042 @@
+# Food Delivery Platform - local infrastructure and services.
+#
+# Infrastructure only:      docker compose up -d
+# Infrastructure + apps:    .\start-local.ps1 (the app services are commented out below; Docker runs the infrastructure)
+# SonarQube (code quality): docker compose --profile quality up -d
+# Debezium CDC (shadow):    docker compose --profile cdc up -d   (see infrastructure/debezium/README.md)
+# AI assistant: Ollama starts with the infrastructure; ai-mcp-server/-client run locally (see docs/ai-assistant-architecture.md)
+#
+# Copy .env.example to .env before the first start.
+#
+# Another project already uses these ports (Kafka 9092, Redis 6379...)? .\start-local.ps1 -PortOffset 10000 moves every
+# port of the platform by 10000 (gateway 18080, Kafka 19092...); by hand, set the *_HOST_PORT values of .env.example.
+#
+# Tools:  Mailpit   http://localhost:8025   (every email the platform sends)
+#         Elasticsearch http://localhost:9200 (search indexes: restaurant, food, category)
+#         phpMyAdmin http://localhost:8095  (MySQL UI: log in as root or as a service's database user)
+#         Redis     localhost:6379          (cache and rate limits: docker exec -it fd-redis redis-cli)
+#         SonarQube http://localhost:9000   (code quality; profile "quality")
+#
+# Disabled on 2026-10-13 to give Docker more memory (their blocks below are commented out; uncomment to use again):
+#         Kafka UI  http://localhost:8090   (topics, messages, consumer groups, schemas)
+#         Kibana    http://localhost:5601   (Elasticsearch UI: Discover, Dev Tools)
+#         Grafana   http://localhost:3000   (dashboards, traces, logs; Food Delivery folder)
+#         Prometheus http://localhost:9090  (metrics)  Tempo http://localhost:3200 (traces)  Loki http://localhost:3100 (logs)
+#         Jaeger    http://localhost:16686  (traces: slow requests, request flow, latency per operation)
+
+name: food-delivery
+
+# Shared settings of the services that publish or consume Kafka events.
+x-kafka-clients: &kafka-clients
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
+# Every service sends its traces (OpenTelemetry, OTLP over HTTP) to Alloy, which passes them on to Tempo and Jaeger.
+# The Observability services are disabled (see below): sampling 0 records no trace, so nothing is sent to the missing
+# Alloy (the trace ids are still in every log line). Set 1.0 again when Observability is enabled again.
+x-tracing: &tracing
+  OTEL_TRACES_ENDPOINT: http://alloy:4318/v1/traces
+  TRACING_SAMPLING_PROBABILITY: "0"
+
+x-kafka-dependencies: &kafka-dependencies
+  mysql:
+    condition: service_healthy
+  kafka:
+    condition: service_healthy
+  schema-registry:
+    condition: service_healthy
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
+
+  mysql:
+    image: mysql:8.4
+    container_name: fd-mysql
+    restart: unless-stopped
+    # Binary logging is on (MySQL's default): without this, only users with SUPER may create triggers.
+    # admin-service's migrations create two (they keep audit records immutable); they are deterministic, so this is safe.
+    command: ["--log-bin-trust-function-creators=1",
+      # Binary log settings that Debezium (profile "cdc") needs; they are MySQL 8.4's defaults, written down so a change is visible.
+      # ROW + FULL: every change is logged with the complete row. Kept 7 days: a connector that was off for longer must re-snapshot.
+      "--server-id=1", "--binlog-format=ROW", "--binlog-row-image=FULL", "--binlog-expire-logs-seconds=604800"]
+    environment:
+      TZ: UTC
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?Set USER_DB_PASSWORD in .env}
+      RESTAURANT_DB_PASSWORD: ${RESTAURANT_DB_PASSWORD:?Set RESTAURANT_DB_PASSWORD in .env}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?Set CATALOG_DB_PASSWORD in .env}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD in .env}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD in .env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?Set NOTIFICATION_DB_PASSWORD in .env}
+      DELIVERY_DB_PASSWORD: ${DELIVERY_DB_PASSWORD:?Set DELIVERY_DB_PASSWORD in .env}
+      DELIVERY_PARTNER_DB_PASSWORD: ${DELIVERY_PARTNER_DB_PASSWORD:?Set DELIVERY_PARTNER_DB_PASSWORD in .env}
+      PROMOTION_DB_PASSWORD: ${PROMOTION_DB_PASSWORD:?Set PROMOTION_DB_PASSWORD in .env}
+      ADMIN_DB_PASSWORD: ${ADMIN_DB_PASSWORD:?Set ADMIN_DB_PASSWORD in .env}
+      REVIEW_DB_PASSWORD: ${REVIEW_DB_PASSWORD:?Set REVIEW_DB_PASSWORD in .env}
+      CHAT_DB_PASSWORD: ${CHAT_DB_PASSWORD:?Set CHAT_DB_PASSWORD in .env}
+      # Only needed for profile "cdc" (see infrastructure/debezium)
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD:-}
+    ports:
+      # Host port 3330 avoids clashing with other MySQL instances on 3306-3312.
+      - "${MYSQL_PORT:-3330}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infrastructure/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # AI assistant: the LLM runtime (starts with the infrastructure). Spring AI in ai-mcp-server talks to it; nothing else does.
+  # CPU only on this machine, so the model is a small one that still supports tool calling (see .env OLLAMA_MODEL).
+  # ---------------------------------------------------------------------------
+
+  ollama:
+    image: ollama/ollama:0.40.2
+    container_name: fd-ollama
+    restart: unless-stopped
+    environment:
+      # Keep the model in memory between questions (loading it again takes a while on a CPU)
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      # One question at a time per loaded model: more parallelism only splits the same CPU
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    volumes:
+      # Models are large: they live in a named volume and survive "docker compose down"
+      - ollama-data:/root/.ollama
+    ports:
+      # Loopback only: the API has no authentication, so it must not be reachable from the network
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-10g}
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # One-shot: downloads the model into the volume the first time (and does nothing when it is already there).
+  ollama-pull:
+    image: ollama/ollama:0.40.2
+    container_name: fd-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen3:4b-instruct-2507-q4_K_M}"]
+    restart: "no"
+
+  # Single Kafka node in KRaft mode (no ZooKeeper): it is both broker and controller.
+  kafka:
+    image: confluentinc/cp-kafka:8.2.4
+    container_name: fd-kafka
+    restart: unless-stopped
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      # INTERNAL: other containers (kafka:29092). EXTERNAL: services on this machine (localhost and the host port).
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:${KAFKA_HOST_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # One node, so every internal topic has a single copy.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created by the services that own them (with the right number of partitions).
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # The INTERNAL listener: the EXTERNAL one tells its clients the host's port, which does not exist in here
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:29092 --list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # Stores the Avro schemas of all events and checks that new versions stay compatible.
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.2.4
+    container_name: fd-schema-registry
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      # Not 8081 on the host: that is user-service's port.
+      - "${SCHEMA_REGISTRY_HOST_PORT:-8091}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Change data capture (profile "cdc"): docker compose --profile cdc up -d
+  # Debezium reads MySQL's binary log and publishes every change of the captured tables to Kafka (topics fdcdc.*).
+  # Shadow mode: nothing consumes these topics yet and the outbox tables are untouched. See infrastructure/debezium/README.md
+  # ---------------------------------------------------------------------------
+
+  kafka-connect:
+    image: quay.io/debezium/connect:3.0.0.Final
+    container_name: fd-kafka-connect
+    restart: unless-stopped
+    profiles: ["cdc"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      # Workers with the same GROUP_ID share the connectors (add tasks for more capacity or failover)
+      GROUP_ID: fd-connect
+      CONFIG_STORAGE_TOPIC: fd-connect-configs
+      OFFSET_STORAGE_TOPIC: fd-connect-offsets
+      STATUS_STORAGE_TOPIC: fd-connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # JSON without the embedded schema: readable in Kafka UI
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      # 8083 is taken by catalog-service on the host.
+      - "8093:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  # One-shot: registers the connector once Kafka Connect is up, then exits.
+  cdc-register:
+    image: curlimages/curl:8.11.1
+    container_name: fd-cdc-register
+    profiles: ["cdc"]
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD:?Set DEBEZIUM_DB_PASSWORD in .env for profile cdc}
+    volumes:
+      - ./infrastructure/debezium:/config:ro
+    entrypoint: ["sh", "/config/register-connector.sh"]
+    restart: "no"
+
+  # DISABLED 2026-10-13 to give Docker more memory: uncomment kafka-ui below to use it again.
+  # kafka-ui:
+    # image: kafbat/kafka-ui:v1.5.0
+    # container_name: fd-kafka-ui
+    # restart: unless-stopped
+    # depends_on:
+      # kafka:
+        # condition: service_healthy
+    # environment:
+      # KAFKA_CLUSTERS_0_NAME: food-delivery
+      # KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      # # Connectors tab (only answers when profile "cdc" is running)
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    # ports:
+      # - "8090:8080"
+
+  # Development mail server: catches every email the platform sends. Web UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    container_name: fd-mailpit
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${MAILPIT_HOST_PORT:-8025}:8025"   # web UI and API
+      - "${MAILPIT_SMTP_HOST_PORT:-1025}:1025"   # SMTP
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # Cache and rate-limit counters only (MySQL stays the source of truth): no persistence, so a restart starts
+  # empty, and when memory is full only keys with an expiry are evicted (cached pages, rate-limit buckets),
+  # never the small cache "generation" counters.
+  redis:
+    image: redis:8.10.2-alpine
+    container_name: fd-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Search index only (MySQL stays the source of truth). Development settings: one node, no TLS/passwords
+  # (security comes in the security phase), and no index is ever created implicitly (search-service creates
+  # its indexes with their mappings).
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.5
+    container_name: fd-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      action.auto_create_index: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTICSEARCH_HOST_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Data UIs (development): Kibana for Elasticsearch, phpMyAdmin for MySQL.
+  # Both listen on this machine only (127.0.0.1).
+  # ---------------------------------------------------------------------------
+
+  # DISABLED 2026-10-13 to give Docker more memory: uncomment Kibana and kibana-setup below to use them again.
+  # # Kibana: browse, search and query the search indexes (Discover, Dev Tools). The same version as Elasticsearch.
+  # # http://localhost:5601 - no login (Elasticsearch security is off in development).
+  # kibana:
+    # image: docker.elastic.co/kibana/kibana:9.4.5
+    # container_name: fd-kibana
+    # restart: unless-stopped
+    # environment:
+      # ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      # SERVER_NAME: kibana
+      # TELEMETRY_OPTIN: "false"
+    # ports:
+      # - "127.0.0.1:5601:5601"
+    # depends_on:
+      # elasticsearch:
+        # condition: service_healthy
+    # healthcheck:
+      # test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status > /dev/null || exit 1"]
+      # interval: 10s
+      # timeout: 10s
+      # retries: 30
+      # start_period: 60s
+
+  # # Once Kibana is up: data views for the restaurant, food and category indexes (Discover shows them at once).
+  # # Safe to run again; the container exits when done.
+  # kibana-setup:
+    # image: curlimages/curl:8.22.0
+    # container_name: fd-kibana-setup
+    # restart: "no"
+    # entrypoint: ["sh", "/setup/create-data-views.sh"]
+    # volumes:
+      # - ./infrastructure/kibana/create-data-views.sh:/setup/create-data-views.sh:ro
+    # depends_on:
+      # kibana:
+        # condition: service_healthy
+
+  # phpMyAdmin: browse and edit the services' databases, run SQL, export and import. http://localhost:8095
+  # Log in as root (MYSQL_ROOT_PASSWORD in .env), or as one service's user (e.g. order_svc / ORDER_DB_PASSWORD),
+  # who sees only that service's database.
+  phpmyadmin:
+    image: phpmyadmin:5.2.3
+    container_name: fd-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "127.0.0.1:${PHPMYADMIN_HOST_PORT:-8095}:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # DISABLED 2026-10-13 to give Docker more memory. To use it again: uncomment the block below (Ctrl+/ in VS Code)
+  # and set TRACING_SAMPLING_PROBABILITY back to 1.0 in x-tracing and in api-gateway (only for Observability).
+  # # ---------------------------------------------------------------------------
+  # # Observability: metrics (Prometheus), traces (Tempo), logs (Loki + Alloy), dashboards (Grafana)
+  # # Configuration in infrastructure/observability. Development settings: no authentication, local disk.
+  # # ---------------------------------------------------------------------------
+
+  # # Scrapes /actuator/prometheus of every service every 15 s; keeps 7 days
+  # prometheus:
+    # image: prom/prometheus:v3.15.0
+    # container_name: fd-prometheus
+    # restart: unless-stopped
+    # command:
+      # - --config.file=/etc/prometheus/prometheus.yml
+      # - --storage.tsdb.retention.time=7d
+      # # Metric points can carry the trace id of a request (Grafana jumps from a slow request to its trace)
+      # - --enable-feature=exemplar-storage
+    # volumes:
+      # - ./infrastructure/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # - prometheus-data:/prometheus
+    # ports:
+      # - "9090:9090"
+
+  # # Receives traces from every service over OTLP (port 4318, HTTP); keeps 2 days
+  # tempo:
+    # image: grafana/tempo:2.10.8
+    # container_name: fd-tempo
+    # restart: unless-stopped
+    # command: ["-config.file=/etc/tempo.yaml"]
+    # volumes:
+      # - ./infrastructure/observability/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      # - tempo-data:/var/tempo
+    # ports:
+      # - "3200:3200"
+
+  # # Jaeger: the traces again, in Jaeger's UI (http://localhost:16686): find slow requests by duration, follow one
+  # # request across the services, compare traces, and (Monitor tab) latency, rate and errors per operation.
+  # # Alloy forwards it every trace; it keeps them 2 days (Badger, jaeger-data volume).
+  # jaeger:
+    # image: jaegertracing/jaeger:2.21.0
+    # container_name: fd-jaeger
+    # restart: unless-stopped
+    # command: ["--config", "/etc/jaeger/config.yaml"]
+    # volumes:
+      # - ./infrastructure/observability/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+      # - jaeger-data:/badger
+    # ports:
+      # - "127.0.0.1:16686:16686"
+    # depends_on:
+      # jaeger-volume-init:
+        # condition: service_completed_successfully
+    # healthcheck:
+      # test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:13133/status || exit 1"]
+      # interval: 10s
+      # timeout: 5s
+      # retries: 12
+      # start_period: 10s
+
+  # # Jaeger runs as user 10001: give it its volume (a new Docker volume belongs to root), then exit
+  # jaeger-volume-init:
+    # image: jaegertracing/jaeger:2.21.0
+    # container_name: fd-jaeger-volume-init
+    # restart: "no"
+    # user: root
+    # entrypoint: ["sh", "-c", "mkdir -p /badger/keys /badger/values && chown -R 10001:0 /badger"]
+    # volumes:
+      # - jaeger-data:/badger
+  # # Log store (the image's single-process configuration: local disk, structured metadata for trace ids)
+  # loki:
+    # image: grafana/loki:3.7.8
+    # container_name: fd-loki
+    # restart: unless-stopped
+    # command: ["-config.file=/etc/loki/local-config.yaml"]
+    # volumes:
+      # - loki-data:/loki
+    # ports:
+      # - "3100:3100"
+
+  # # Reads the logs of this project's containers from Docker and sends them to Loki (UI: http://localhost:12345)
+  # alloy:
+    # image: grafana/alloy:v1.20.1
+    # container_name: fd-alloy
+    # restart: unless-stopped
+    # command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    # volumes:
+      # - ./infrastructure/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      # # How far each container's log has been read: a new Alloy container does not send old lines again
+      # - alloy-data:/var/lib/alloy/data
+    # ports:
+      # - "12345:12345"
+      # # OTLP traces from the services (gRPC, HTTP): services started on this machine send them here
+      # - "4317:4317"
+      # - "4318:4318"
+    # depends_on:
+      # - loki
+      # - tempo
+      # - jaeger
+
+  # # Dashboards (Food Delivery folder), with Prometheus, Tempo and Loki linked to each other
+  # grafana:
+    # image: grafana/grafana:13.2.3
+    # container_name: fd-grafana
+    # restart: unless-stopped
+    # environment:
+      # # Development: open without login (as Viewer); sign in as admin to edit
+      # GF_AUTH_ANONYMOUS_ENABLED: "true"
+      # GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # GF_SECURITY_ADMIN_USER: admin
+      # GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/services.json
+    # volumes:
+      # - ./infrastructure/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      # - ./infrastructure/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # - grafana-data:/var/lib/grafana
+    # ports:
+      # - "3000:3000"
+    # depends_on:
+      # - prometheus
+      # - tempo
+      # - loki
+
+  # # Elasticsearch health and index metrics for Prometheus
+  # elasticsearch-exporter:
+    # image: prometheuscommunity/elasticsearch-exporter:v1.11.0
+    # container_name: fd-elasticsearch-exporter
+    # restart: unless-stopped
+    # command: ["--es.uri=http://elasticsearch:9200"]
+    # depends_on:
+      # - elasticsearch
+
+  # # Redis availability and memory for Prometheus
+  # redis-exporter:
+    # image: oliver006/redis_exporter:v1.93.0
+    # container_name: fd-redis-exporter
+    # restart: unless-stopped
+    # environment:
+      # REDIS_ADDR: redis://redis:6379
+    # depends_on:
+      # - redis
+
+  # ---------------------------------------------------------------------------
+  # Code quality (started only with: --profile quality), see quality/README.md
+  # SonarQube keeps the analysis of every service; quality/sonar-scan.ps1 runs it.
+  # Needs about 3 GB of memory: stop the apps first if Docker is short of it.
+  # ---------------------------------------------------------------------------
+
+  sonarqube-db:
+    image: postgres:17.11-alpine
+    container_name: fd-sonarqube-db
+    profiles: ["quality"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sonarqube
+      POSTGRES_USER: sonarqube
+      POSTGRES_PASSWORD: ${SONARQUBE_DB_PASSWORD:?Set SONARQUBE_DB_PASSWORD in .env}
+    volumes:
+      - sonarqube-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonarqube -d sonarqube"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sonarqube:
+    image: sonarqube:26.9.0.129388-community
+    container_name: fd-sonarqube
+    profiles: ["quality"]
+    restart: unless-stopped
+    depends_on:
+      sonarqube-db:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonarqube
+      SONAR_JDBC_PASSWORD: ${SONARQUBE_DB_PASSWORD:?Set SONARQUBE_DB_PASSWORD in .env}
+      # The embedded Elasticsearch would otherwise require vm.max_map_count >= 524288 on the Docker host
+      SONAR_SEARCH_JAVAADDITIONALOPTS: "-Dnode.store.allow_mmap=false"
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    ports:
+      - "9000:9000"
+
+  # ---------------------------------------------------------------------------
+  # Applications. DISABLED 2026-10-14: the Spring Boot services below are commented out (and their images removed), run them on this
+  # machine with .\start-local.ps1 (infrastructure stays in Docker). To run them in Docker again: uncomment the
+  # blocks (Ctrl+/ in VS Code), then docker compose --profile apps up -d --build.
+  # Services that use Kafka events are built from the repository root, because they
+  # need the shared event-contracts library; their Dockerfile builds it first.
+  # ---------------------------------------------------------------------------
+
+  # api-gateway:
+    # build: ./api-gateway
+    # image: food-delivery/api-gateway:latest
+    # container_name: fd-api-gateway
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on:
+      # redis:
+        # condition: service_healthy
+    # environment:
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5180}
+      # OTEL_TRACES_ENDPOINT: http://alloy:4318/v1/traces
+      # # 0 while the Observability services are disabled (see x-tracing at the top)
+      # TRACING_SAMPLING_PROBABILITY: "0"
+      # REDIS_HOST: redis
+      # # Login and registration attempts per client IP and minute. Generous here because the test scripts sign up and
+      # # log in many users from one machine; production keeps the default (10 per minute). The limits, timeouts and
+      # # retries of the other routes are set per service in the gateway's application.yml (app.gateway.services).
+      # GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:-120}
+      # USER_SERVICE_URL: http://user-service:8081
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # CATALOG_SERVICE_URL: http://catalog-service:8083
+      # ORDER_SERVICE_URL: http://order-service:8084
+      # PAYMENT_SERVICE_URL: http://payment-service:8085
+      # NOTIFICATION_SERVICE_URL: http://notification-service:8086
+      # DELIVERY_SERVICE_URL: http://delivery-service:8087
+      # DELIVERY_PARTNER_SERVICE_URL: http://delivery-partner-service:8099
+      # SEARCH_SERVICE_URL: http://search-service:8088
+      # PROMOTION_SERVICE_URL: http://promotion-service:8089
+      # REVIEW_SERVICE_URL: http://review-service:8094
+      # CHAT_SERVICE_URL: http://chat-service:8096
+      # AI_MCP_CLIENT_URL: http://ai-mcp-client:8097
+      # ADMIN_SERVICE_URL: http://admin-service:8092
+    # ports:
+      # - "8080:8080"
+
+  # user-service:
+    # build:
+      # context: .
+      # dockerfile: user-service/Dockerfile
+    # image: food-delivery/user-service:latest
+    # container_name: fd-user-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/user_db
+      # DB_USERNAME: user_svc
+      # DB_PASSWORD: ${USER_DB_PASSWORD}
+      # BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      # BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    # ports:
+      # # Only for calling user-service directly; the other services reach it as user-service:8081 inside Docker.
+      # # Another program on the machine may hold 8081: set USER_SERVICE_HOST_PORT in .env to use another one.
+      # - "${USER_SERVICE_HOST_PORT:-8081}:8081"
+
+  # restaurant-service:
+    # build:
+      # context: .
+      # dockerfile: restaurant-service/Dockerfile
+    # image: food-delivery/restaurant-service:latest
+    # container_name: fd-restaurant-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/restaurant_db
+      # # Cache of public restaurant pages (optional: without Redis, pages are read from MySQL)
+      # REDIS_HOST: redis
+      # DB_USERNAME: restaurant_svc
+      # DB_PASSWORD: ${RESTAURANT_DB_PASSWORD}
+      # # Direct service-to-service call (not through the gateway)
+      # USER_SERVICE_URL: http://user-service:8081
+    # ports:
+      # - "8082:8082"
+
+  # catalog-service:
+    # build:
+      # context: .
+      # dockerfile: catalog-service/Dockerfile
+    # image: food-delivery/catalog-service:latest
+    # container_name: fd-catalog-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # DB_URL: jdbc:mysql://mysql:3306/catalog_db
+      # # Cache of menus and categories (optional: without Redis, they are read from MySQL)
+      # REDIS_HOST: redis
+      # DB_USERNAME: catalog_svc
+      # DB_PASSWORD: ${CATALOG_DB_PASSWORD}
+      # # Direct service-to-service call (fallback when a restaurant is not known locally yet)
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+    # ports:
+      # - "8083:8083"
+
+  # order-service:
+    # build:
+      # context: .
+      # dockerfile: order-service/Dockerfile
+    # image: food-delivery/order-service:latest
+    # container_name: fd-order-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/order_db
+      # DB_USERNAME: order_svc
+      # DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      # # Online-payment orders still unpaid after this are cancelled by the system (saga timeout)
+      # ORDER_PAYMENT_TIMEOUT: ${ORDER_PAYMENT_TIMEOUT:-15m}
+      # # Direct service-to-service calls (not through the gateway)
+      # USER_SERVICE_URL: http://user-service:8081
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # CATALOG_SERVICE_URL: http://catalog-service:8083
+      # PROMOTION_SERVICE_URL: http://promotion-service:8089
+    # ports:
+      # - "8084:8084"
+
+  # payment-service:
+    # build:
+      # context: .
+      # dockerfile: payment-service/Dockerfile
+    # image: food-delivery/payment-service:latest
+    # container_name: fd-payment-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # DB_URL: jdbc:mysql://mysql:3306/payment_db
+      # DB_USERNAME: payment_svc
+      # DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
+      # # The payment provider's request quota (Resilience4j rate limiter): charges per second
+      # PAYMENT_PROVIDER_CHARGES_PER_SECOND: ${PAYMENT_PROVIDER_CHARGES_PER_SECOND:-20}
+      # # Online payments: SIMULATED (built-in test gateway, the default) or RAZORPAY (Razorpay Checkout).
+      # # The Razorpay keys come from .env only (never commit them); use Test Mode keys (rzp_test_...) for testing.
+      # PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-SIMULATED}
+      # RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      # RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      # RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      # RAZORPAY_MERCHANT_NAME: ${RAZORPAY_MERCHANT_NAME:-Front-App}
+      # # Direct service-to-service calls (not through the gateway)
+      # ORDER_SERVICE_URL: http://order-service:8084
+    # ports:
+      # - "8085:8085"
+
+  # notification-service:
+    # build:
+      # context: .
+      # dockerfile: notification-service/Dockerfile
+    # image: food-delivery/notification-service:latest
+    # container_name: fd-notification-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on:
+      # <<: *kafka-dependencies
+      # mailpit:
+        # condition: service_healthy
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/notification_db
+      # DB_USERNAME: notification_svc
+      # DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      # MAIL_HOST: mailpit
+      # MAIL_PORT: 1025
+      # # Direct service-to-service calls when sending: recipient's contact details, restaurant's owner
+      # USER_SERVICE_URL: http://user-service:8081
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # # Live updates (WebSocket): the web pages that may open a connection (the same as the gateway's CORS)
+      # REALTIME_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5180}
+    # ports:
+      # - "8086:8086"
+
+  # delivery-service:
+    # build:
+      # context: .
+      # dockerfile: delivery-service/Dockerfile
+    # image: food-delivery/delivery-service:latest
+    # container_name: fd-delivery-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # DB_URL: jdbc:mysql://mysql:3306/delivery_db
+      # DB_USERNAME: delivery_svc
+      # DB_PASSWORD: ${DELIVERY_DB_PASSWORD}
+      # # How long a partner has to accept an offer before it goes to someone else
+      # DELIVERY_ACCEPT_TIMEOUT: ${DELIVERY_ACCEPT_TIMEOUT:-2m}
+      # # Direct service-to-service calls, only for details whose events have not arrived (yet)
+      # DELIVERY_PARTNER_SERVICE_URL: http://delivery-partner-service:8099
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # ORDER_SERVICE_URL: http://order-service:8084
+    # ports:
+      # - "8087:8087"
+
+  # # Delivery partners: registration, profile, suspension (owner of partners since event-contracts 1.7.0).
+  # # delivery-service keeps what partners are doing (online, on a delivery) and assigns the deliveries.
+  # delivery-partner-service:
+    # build:
+      # context: .
+      # dockerfile: delivery-partner-service/Dockerfile
+    # image: food-delivery/delivery-partner-service:latest
+    # container_name: fd-delivery-partner-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/delivery_partner_db
+      # DB_USERNAME: delivery_partner_svc
+      # DB_PASSWORD: ${DELIVERY_PARTNER_DB_PASSWORD}
+      # # A partner's first call, when their UserRegistered event has not arrived
+      # USER_SERVICE_URL: http://user-service:8081
+      # # Only for the one-off import of the partners delivery-service kept before this service existed
+      # DELIVERY_SERVICE_URL: http://delivery-service:8087
+    # ports:
+      # - "8099:8099"
+
+  # search-service:
+    # build:
+      # context: .
+      # dockerfile: search-service/Dockerfile
+    # image: food-delivery/search-service:latest
+    # container_name: fd-search-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on:
+      # kafka:
+        # condition: service_healthy
+      # schema-registry:
+        # condition: service_healthy
+      # elasticsearch:
+        # condition: service_healthy
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # ELASTICSEARCH_URIS: http://elasticsearch:9200
+      # # The services that own the data: the consistency check compares the indexes with them
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # CATALOG_SERVICE_URL: http://catalog-service:8083
+      # # The ratings (average and count per restaurant and dish) are copied from here, for sorting and filtering
+      # REVIEW_SERVICE_URL: http://review-service:8094
+    # ports:
+      # - "8088:8088"
+
+  # promotion-service:
+    # build:
+      # context: .
+      # dockerfile: promotion-service/Dockerfile
+    # image: food-delivery/promotion-service:latest
+    # container_name: fd-promotion-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # DB_URL: jdbc:mysql://mysql:3306/promotion_db
+      # DB_USERNAME: promotion_svc
+      # DB_PASSWORD: ${PROMOTION_DB_PASSWORD}
+      # # A coupon use reserved at checkout is given back if no order was placed with it within this time
+      # COUPON_RESERVATION_EXPIRY: ${COUPON_RESERVATION_EXPIRY:-30m}
+    # ports:
+      # - "8089:8089"
+
+  # chat-service:
+    # build:
+      # context: .
+      # dockerfile: chat-service/Dockerfile
+    # image: food-delivery/chat-service:latest
+    # container_name: fd-chat-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/chat_db
+      # DB_USERNAME: chat_svc
+      # DB_PASSWORD: ${CHAT_DB_PASSWORD}
+      # # Names of the people who chat, and who is online right now (best effort)
+      # USER_SERVICE_URL: http://user-service:8081
+      # NOTIFICATION_SERVICE_URL: http://notification-service:8086
+    # ports:
+      # - "8096:8096"
+
+  # review-service:
+    # build:
+      # context: .
+      # dockerfile: review-service/Dockerfile
+    # image: food-delivery/review-service:latest
+    # container_name: fd-review-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on:
+      # mysql:
+        # condition: service_healthy
+    # environment:
+      # <<: *tracing
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # DB_URL: jdbc:mysql://mysql:3306/review_db
+      # DB_USERNAME: review_svc
+      # DB_PASSWORD: ${REVIEW_DB_PASSWORD}
+      # # A review is checked against the order, and dishes get their photo from the catalog
+      # ORDER_SERVICE_URL: http://order-service:8084
+      # CATALOG_SERVICE_URL: http://catalog-service:8083
+    # ports:
+      # - "8094:8094"
+
+  # The two AI assistant services (Spring Boot, so commented out with the others; run them locally). In Docker:
+  #   uncomment them, then docker compose --profile ai up -d --build
+  # # ai-mcp-server: the agent (Spring AI + Ollama) and the tools; it calls the business APIs ONLY through the gateway.
+  # ai-mcp-server:
+    # build:
+      # context: .
+      # dockerfile: ai-mcp-server/Dockerfile
+    # image: food-delivery/ai-mcp-server:latest
+    # container_name: fd-ai-mcp-server
+    # profiles: ["ai"]
+    # restart: unless-stopped
+    # depends_on:
+      # ollama:
+        # condition: service_healthy
+      # redis:
+        # condition: service_healthy
+    # environment:
+      # <<: *tracing
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # OLLAMA_BASE_URL: http://ollama:11434
+      # OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+      # GATEWAY_URL: http://api-gateway:8080
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # REDIS_HOST: redis
+      # # Shared secret between ai-mcp-client and ai-mcp-server (and any MCP host that uses /mcp). Never routed by the gateway.
+      # AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env}
+      # APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
+    # # Internal only: reached by ai-mcp-client over the compose network. Bound to the loopback for local debugging.
+    # ports:
+      # - "127.0.0.1:8098:8098"
+
+  # # ai-mcp-client: what the browser talks to (through the gateway): access token check, conversation, limits.
+  # ai-mcp-client:
+    # build:
+      # context: .
+      # dockerfile: ai-mcp-client/Dockerfile
+    # image: food-delivery/ai-mcp-client:latest
+    # container_name: fd-ai-mcp-client
+    # profiles: ["ai"]
+    # restart: unless-stopped
+    # depends_on:
+      # ai-mcp-server:
+        # condition: service_started
+      # redis:
+        # condition: service_healthy
+    # environment:
+      # <<: *tracing
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # AGENT_SERVER_URL: http://ai-mcp-server:8098
+      # # The public key of the access tokens (user-service's JWKS)
+      # USER_SERVICE_URL: http://user-service:8081
+      # REDIS_HOST: redis
+      # AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?Set AI_SERVICE_TOKEN in .env}
+    # ports:
+      # - "8097:8097"
+
+  # admin-service:
+    # build:
+      # context: .
+      # dockerfile: admin-service/Dockerfile
+    # image: food-delivery/admin-service:latest
+    # container_name: fd-admin-service
+    # profiles: ["apps"]
+    # restart: unless-stopped
+    # depends_on: *kafka-dependencies
+    # environment:
+      # <<: [*kafka-clients, *tracing]
+      # SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # # Phase 18: the shared secret of the internal APIs (/api/v1/internal/**)
+      # INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # DB_URL: jdbc:mysql://mysql:3306/admin_db
+      # DB_USERNAME: admin_svc
+      # DB_PASSWORD: ${ADMIN_DB_PASSWORD}
+      # # The dashboard and reports ask the services that own the data (as the admin who asked)
+      # USER_SERVICE_URL: http://user-service:8081
+      # RESTAURANT_SERVICE_URL: http://restaurant-service:8082
+      # CATALOG_SERVICE_URL: http://catalog-service:8083
+      # ORDER_SERVICE_URL: http://order-service:8084
+      # PAYMENT_SERVICE_URL: http://payment-service:8085
+      # NOTIFICATION_SERVICE_URL: http://notification-service:8086
+      # DELIVERY_SERVICE_URL: http://delivery-service:8087
+      # DELIVERY_PARTNER_SERVICE_URL: http://delivery-partner-service:8099
+      # PROMOTION_SERVICE_URL: http://promotion-service:8089
+    # ports:
+      # - "8092:8092"
+
+volumes:
+  ollama-data:
+  mysql-data:
+  kafka-data:
+  elasticsearch-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  grafana-data:
+  jaeger-data:
+  alloy-data:
+  sonarqube-db-data:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:

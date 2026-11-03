@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "PaymentStatusChanged",
+  "namespace": "com.fooddelivery.events.payment",
+  "doc": "A payment reached a final status: SUCCESS (the order can go to the restaurant), FAILED (the customer may try again) or REFUNDED (fully refunded). Producer: payment-service. Consumer: order-service. Topic: fooddelivery.payment.status-changed (key: orderId, so all payments of one order stay in order).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "paymentId", "type": "long" },
+    { "name": "orderId", "type": "long" },
+    { "name": "customerId", "type": "long" },
+    { "name": "status", "type": "string", "doc": "SUCCESS, FAILED or REFUNDED" },
+    { "name": "method", "type": "string", "doc": "CARD, UPI or WALLET" },
+    { "name": "amount", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "refundedAmount", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "currency", "type": "string" },
+    { "name": "reason", "type": ["null", "string"], "default": null, "doc": "Why the payment failed, or why it was refunded" }
+  ]
+}

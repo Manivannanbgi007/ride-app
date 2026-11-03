@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "AdminActionAudited",
+  "namespace": "com.fooddelivery.events.admin",
+  "doc": "A platform admin did something that is audited (approved a restaurant, cancelled an order, refunded a payment, ...). A copy of the audit record the owning service saved, in the same transaction as the action. Producers: every service with admin actions. Consumer: admin-service (platform-wide audit log). Topic: fooddelivery.admin.action-audited (key: entityType:entityId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" }, "doc": "When the action was audited" },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the admin's request" },
+    { "name": "sourceService", "type": "string", "doc": "Service that owns the entity and saved the audit record, e.g. order-service" },
+    { "name": "auditId", "type": "long", "doc": "Id of the audit record in the source service: (sourceService, auditId) identifies a record, so a replayed record is stored once" },
+    { "name": "adminUserId", "type": "long" },
+    { "name": "action", "type": "string", "doc": "e.g. RESTAURANT_SUSPENDED, ORDER_CANCELLED_BY_ADMIN, COUPON_CREATED" },
+    { "name": "entityType", "type": "string", "doc": "e.g. RESTAURANT, ORDER, COUPON" },
+    { "name": "entityId", "type": "string", "doc": "Id of the entity (text: some actions concern a group, e.g. ALL)" },
+    { "name": "oldValue", "type": ["null", "string"], "default": null },
+    { "name": "newValue", "type": ["null", "string"], "default": null },
+    { "name": "reason", "type": ["null", "string"], "default": null },
+    { "name": "ipAddress", "type": ["null", "string"], "default": null }
+  ]
+}

@@ -1,0 +1,79 @@
+# Jaeger 2 (built on the OpenTelemetry Collector). Alloy forwards it a copy of every trace (OTLP).
+#   - traces are kept in Badger (on the jaeger-data volume) for 2 days, like Tempo's
+#   - the spanmetrics connector turns them into request rate, error rate and latency per service and operation;
+#     Prometheus scrapes them (port 8889) and Jaeger's Monitor tab reads them back from Prometheus
+# Based on cmd/jaeger/config-badger.yaml and config-spm.yaml of Jaeger v2.21.0.
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter, spanmetrics]
+    metrics/spanmetrics:
+      receivers: [spanmetrics]
+      exporters: [prometheus]
+  telemetry:
+    resource:
+      service.name: jaeger
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+    logs:
+      level: info
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+
+  jaeger_query:
+    storage:
+      traces: traces
+      metrics: span_metrics
+
+  jaeger_storage:
+    backends:
+      traces:
+        badger:
+          directories:
+            keys: /badger/keys
+            values: /badger/values
+          ephemeral: false
+          ttl:
+            spans: 48h
+    metric_backends:
+      span_metrics:
+        prometheus:
+          endpoint: http://prometheus:9090
+          normalize_calls: true
+          normalize_duration: true
+
+connectors:
+  # One series per service, operation (e.g. "http get /api/v1/orders/{orderId}"), span kind and status
+  spanmetrics:
+    metrics_flush_interval: 15s
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: traces
+  prometheus:
+    endpoint: 0.0.0.0:8889

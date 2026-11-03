@@ -1,0 +1,36 @@
+package com.fooddelivery.searchservice.dto.request;
+
+import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Size;
+
+/** Restaurant search; every filter is optional. Without q, restaurants are listed by name (or distance). */
+public record RestaurantSearchCriteria(
+
+        @Parameter(description = "Words to look for in name, cuisines and description (typos are tolerated)",
+                example = "biryani")
+        @Size(max = 100)
+        String q,
+
+        @Parameter(description = "Only restaurants in this city (any letter case)", example = "Bengaluru")
+        @Size(max = 100)
+        String city,
+
+        @Parameter(description = "Only restaurants with this cuisine (any letter case)", example = "North Indian")
+        @Size(max = 50)
+        String cuisine,
+
+        @Parameter(description = "Your position, to sort by distance (send lat and lon together)", example = "12.9716")
+        @DecimalMin("-90.0") @DecimalMax("90.0")
+        Double lat,
+
+        @Parameter(example = "77.5946")
+        @DecimalMin("-180.0") @DecimalMax("180.0")
+        Double lon,
+
+        @Parameter(description = "With lat/lon: only restaurants within this many kilometres", example = "5")
+        @DecimalMin("0.1") @DecimalMax("100.0")
+        Double radiusKm
+) {
+}

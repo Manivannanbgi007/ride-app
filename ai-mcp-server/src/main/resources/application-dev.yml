@@ -1,0 +1,8 @@
+# Local development
+app:
+  # Development only: the same default is in ai-mcp-client's dev profile. Production has no default.
+  service-token: ${AI_SERVICE_TOKEN:dev-ai-service-token}
+
+logging:
+  level:
+    com.fooddelivery: DEBUG

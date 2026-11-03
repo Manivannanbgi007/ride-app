@@ -1,0 +1,154 @@
+server:
+  port: ${SERVER_PORT:8089}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies, so getRemoteAddr() is the real client IP.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: promotion-service
+  # Who is calling: the access token signed by user-service. Its public key is read from user-service (once, then
+  # kept); the issuer and audience must be the platform's (user-service app.jwt). The "role" claim becomes the role.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  profiles:
+    default: dev
+
+  # Local runs: read passwords from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:${MYSQL_PORT:3330}/promotion_db}
+    username: ${DB_USERNAME:promotion_svc}
+    password: ${DB_PASSWORD:${PROMOTION_DB_PASSWORD:}}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    locations: classpath:db/migration
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+  # Order events (Avro) consumed from Kafka; the schemas live in Schema Registry.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Tracing: the trace context travels in the message headers, from the producer to every consumer
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+    consumer:
+      group-id: ${spring.application.name}
+      # A new consumer group starts from the oldest event, so coupon uses of orders placed before its first start
+      # are followed too. After that the group resumes where it stopped.
+      auto-offset-reset: earliest
+      # A message that cannot be read must not block its partition: the error handler sends it to the dead-letter topic.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.KafkaAvroDeserializer
+        # Generated classes (e.g. OrderCreated) instead of generic records
+        specific.avro.reader: true
+    # Used only to forward failed messages to the dead-letter topics.
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      acks: all
+
+app:
+  kafka:
+    topics:
+      partitions: 3
+      replicas: ${KAFKA_TOPIC_REPLICAS:1}
+  # Transactional outbox (see OutboxProperties): audit records for the platform-wide audit log
+  outbox:
+    relay-enabled: true
+    poll-interval: 500ms
+    batch-size: 100
+    send-timeout: 15s
+    max-backoff: 10s
+    retention: 7d
+  # Coupon dates are calendar days in this time zone
+  business-time-zone: Asia/Kolkata
+  # Idempotent consumers: ids of applied events are kept this long (Kafka keeps events 7 days)
+  processed-events:
+    retention: 30d
+  # Coupon uses reserved at checkout that never got an order are given back after this long
+  reservations:
+    cleanup-enabled: true
+    cleanup-interval: 60s
+    expire-after: ${COUPON_RESERVATION_EXPIRY:30m}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  # Observability (Phase 14b): metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Promotion Service
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user=, event=, order=, payment=, delivery=
+    # (empty ones are left out). Loki and Grafana read the trace id from here to link logs and traces.
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} event=%X{eventId} order=%X{orderId} payment=%X{paymentId} delivery=%X{deliveryId} ){'[a-zA-Z]+= ', ''}"
+
+# The shared secret of the internal APIs (/api/v1/internal/**): the other services send it as X-Service-Token.
+# Required (no default) outside the dev profile.
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN}

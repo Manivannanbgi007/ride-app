@@ -1,0 +1,27 @@
+# Integration tests (Testcontainers provides the datasource and Kafka; the order events are published by the
+# tests). The tests run the reservation clean-up themselves, so the job is switched off here.
+spring:
+  kafka:
+    properties:
+      # In-memory Schema Registry, shared by every serializer and deserializer in the test JVM.
+      schema.registry.url: mock://promotion-service-tests
+
+app:
+  reservations:
+    cleanup-enabled: false
+    expire-after: 2s
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP and Kafka headers, and outbox rows), which the tests rely on.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

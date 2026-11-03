@@ -1,0 +1,10 @@
+# Production: expose only what monitoring needs.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+
+logging:
+  level:
+    root: INFO

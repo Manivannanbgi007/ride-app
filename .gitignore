@@ -1,0 +1,35 @@
+# Build output
+target/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# Maven wrapper downloads
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Local secrets of the backend (copy .env.example to .env). Only the root one: front-app's .env files hold no
+# secrets and are committed (front-app/.gitignore ignores its personal .env.local files).
+/.env
+
+# Frontend
+node_modules/
+dist/

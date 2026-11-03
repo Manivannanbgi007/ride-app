@@ -1,0 +1,144 @@
+### Food Delivery Platform - Promotion Service (coupons)
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+###
+### Platform admins create and manage coupons; customers see the coupons on offer and apply one to their cart
+### (order-service.http, step 8a). At checkout order-service reserves one use of the coupon; the order's events
+### then decide whether the use counts: OrderCreated -> APPLIED, delivered -> REDEEMED, cancelled -> RELEASED.
+### A reservation that never got an order is given back after 30 minutes (EXPIRED).
+###
+### Caller identity: the access token of an admin's sign-in below (Authorization: Bearer) for /admin/**.
+
+@gateway = http://localhost:8080
+# The services' shared secret of the internal APIs: the dev profile's value (INTERNAL_SERVICE_TOKEN elsewhere)
+@internalServiceToken = dev-internal-service-token
+@service = http://localhost:8089
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@couponId = {{createCoupon.response.body.$.id}}
+@couponVersion = {{createCoupon.response.body.$.version}}
+
+
+### ============================ ADMIN ============================
+
+### 1. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 2. Create a coupon: 100 off orders of 499 or more, once per customer, 1000 uses (409 if the code exists)
+###    Dates are calendar days in the business time zone (Asia/Kolkata); change them to include today.
+# @name createCoupon
+POST {{gateway}}/api/v1/admin/coupons
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "WELCOME100",
+  "description": "100 off your first order",
+  "discountType": "FIXED",
+  "discountValue": 100,
+  "minOrderAmount": 499,
+  "validFrom": "2026-10-01",
+  "validUntil": "2026-12-31",
+  "usageLimit": 1000,
+  "perCustomerLimit": 1
+}
+
+### 3. A percentage coupon for one restaurant: 20% off, at most 150 (set restaurantId to one of yours)
+POST {{gateway}}/api/v1/admin/coupons
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "SPICE20",
+  "description": "20% off at Spice Hub",
+  "discountType": "PERCENTAGE",
+  "discountValue": 20,
+  "maxDiscount": 150,
+  "minOrderAmount": 0,
+  "restaurantId": 1,
+  "validFrom": "2026-10-01",
+  "validUntil": "2026-10-31",
+  "usageLimit": 500,
+  "perCustomerLimit": 3
+}
+
+### 4. Search coupons (code contains, status, discountType, restaurantId, validOn=a date); each shows its availability
+GET {{gateway}}/api/v1/admin/coupons?code=welcome&status=ACTIVE&page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 5. Coupon details with usage: uses by status, discount given, distinct customers
+GET {{gateway}}/api/v1/admin/coupons/{{couponId}}
+Authorization: Bearer {{adminToken}}
+
+### 6. Change the terms (send the version you read; 409 if someone changed it meanwhile).
+###    The code cannot change; the usage limit cannot go below the uses already taken.
+PUT {{gateway}}/api/v1/admin/coupons/{{couponId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "description": "100 off your first order",
+  "discountType": "FIXED",
+  "discountValue": 100,
+  "minOrderAmount": 399,
+  "validFrom": "2026-10-01",
+  "validUntil": "2026-12-31",
+  "usageLimit": 2000,
+  "perCustomerLimit": 1,
+  "version": {{couponVersion}}
+}
+
+### 7. Pause the coupon (customers get "This coupon is not active")
+PUT {{gateway}}/api/v1/admin/coupons/{{couponId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Campaign paused" }
+
+### 8. Resume it
+PUT {{gateway}}/api/v1/admin/coupons/{{couponId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Campaign resumed" }
+
+### 9. Who used it, and what happened to each use (status: RESERVED, APPLIED, REDEEMED, RELEASED, EXPIRED)
+GET {{gateway}}/api/v1/admin/coupons/{{couponId}}/redemptions?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 10. Audit trail of the coupon
+GET {{gateway}}/api/v1/admin/coupons/{{couponId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+
+### ============================ CUSTOMER ============================
+
+### 11. Coupons on offer today (optionally only those valid at one restaurant)
+GET {{gateway}}/api/v1/coupons?restaurantId=1
+
+
+### ===================== INTERNAL (order-service) =====================
+### Not routed by the gateway: called directly on the service port.
+
+### 12. Would the coupon work for this cart? (changes nothing)
+POST {{service}}/api/v1/internal/coupons/check
+X-Service-Token: {{internalServiceToken}}
+Content-Type: application/json
+
+{ "code": "WELCOME100", "customerId": 999, "restaurantId": 1, "itemsTotal": 379.00 }
+
+### 13. Reserve one use for a checkout (the same key again returns the same reservation)
+POST {{service}}/api/v1/internal/coupon-reservations
+X-Service-Token: {{internalServiceToken}}
+Content-Type: application/json
+
+{ "reservationKey": "checkout:999:http-file-test", "code": "WELCOME100", "customerId": 999, "restaurantId": 1, "itemsTotal": 599.00 }
+
+### 14. The checkout failed: give the use back (EXPIRED)
+DELETE {{service}}/api/v1/internal/coupon-reservations/checkout:999:http-file-test
+X-Service-Token: {{internalServiceToken}}

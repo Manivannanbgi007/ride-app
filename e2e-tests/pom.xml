@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Only for the managed versions (JUnit, AssertJ, Awaitility, Jackson, Testcontainers): this is not an application -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.fooddelivery</groupId>
+    <artifactId>e2e-tests</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>e2e-tests</name>
+    <description>End-to-end tests of the running platform: business flows across the services, through the API Gateway</description>
+
+    <properties>
+        <java.version>21</java.version>
+
+        <!-- Where the platform runs (-De2e.baseUrl=...; empty: E2E_BASE_URL, else http://localhost:8080) -->
+        <e2e.baseUrl/>
+        <e2e.mailpitUrl/>
+        <e2e.prometheusUrl/>
+        <e2e.lokiUrl/>
+        <e2e.tempoUrl/>
+        <!-- Opt-in flows: -Presilience (stops containers), -Pobservability (needs Prometheus, Loki, Tempo) -->
+        <e2e.excludedGroups>resilience,observability</e2e.excludedGroups>
+        <e2e.groups/>
+
+        <!-- Code quality (Phase 15a): the same Checkstyle rules as the services -->
+        <quality.dir>${project.basedir}/../quality</quality.dir>
+        <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+        <checkstyle.version>14.3.0</checkstyle.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Docker client for the resilience tests (stop and start a service's container) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- One flow after the other: they share the platform (and its dashboard figures) -->
+                    <excludedGroups>${e2e.excludedGroups}</excludedGroups>
+                    <groups>${e2e.groups}</groups>
+                    <systemPropertyVariables>
+                        <e2e.baseUrl>${e2e.baseUrl}</e2e.baseUrl>
+                        <e2e.mailpitUrl>${e2e.mailpitUrl}</e2e.mailpitUrl>
+                        <e2e.prometheusUrl>${e2e.prometheusUrl}</e2e.prometheusUrl>
+                        <e2e.lokiUrl>${e2e.lokiUrl}</e2e.lokiUrl>
+                        <e2e.tempoUrl>${e2e.tempoUrl}</e2e.tempoUrl>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>${maven-checkstyle-plugin.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>${checkstyle.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>${quality.dir}/checkstyle.xml</configLocation>
+                    <suppressionsLocation>${quality.dir}/checkstyle-suppressions.xml</suppressionsLocation>
+                    <sourceDirectories>
+                        <sourceDirectory>${project.build.sourceDirectory}</sourceDirectory>
+                    </sourceDirectories>
+                    <testSourceDirectories>
+                        <testSourceDirectory>${project.build.testSourceDirectory}</testSourceDirectory>
+                    </testSourceDirectories>
+                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                    <includeResources>false</includeResources>
+                    <includeTestResources>false</includeTestResources>
+                    <consoleOutput>true</consoleOutput>
+                    <violationSeverity>error</violationSeverity>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>checkstyle</id>
+                        <!-- Before the tests: a style error shows up without waiting for the flows -->
+                        <phase>process-test-classes</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- mvnw verify -Presilience: the tests that stop and start containers (they disturb the running platform) -->
+        <profile>
+            <id>resilience</id>
+            <properties>
+                <e2e.excludedGroups/>
+                <e2e.groups>resilience</e2e.groups>
+            </properties>
+        </profile>
+        <!-- mvnw verify -Pobservability: one checkout seen in Prometheus, Loki and Tempo (development stack) -->
+        <profile>
+            <id>observability</id>
+            <properties>
+                <e2e.excludedGroups/>
+                <e2e.groups>observability</e2e.groups>
+            </properties>
+        </profile>
+    </profiles>
+</project>

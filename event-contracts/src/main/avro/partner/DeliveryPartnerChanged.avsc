@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "DeliveryPartnerChanged",
+  "namespace": "com.fooddelivery.events.partner",
+  "doc": "Added in 1.7.0. A delivery partner was registered, edited their profile, or was suspended or reactivated by an admin. Carries the partner's current state, so consumers can keep their own copy. Producer: delivery-partner-service (owner of partners). Consumer: delivery-service (its dispatch list: who can be offered deliveries, in which city). Topic: fooddelivery.delivery-partner.changed (key: partnerUserId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "changeType", "type": "string", "doc": "REGISTERED, PROFILE_UPDATED, SUSPENDED, ACTIVATED or IMPORTED (completed from what delivery-service kept before; string: new types must not break consumers)" },
+    { "name": "partnerUserId", "type": "long", "doc": "The partner's user id (user-service)" },
+    { "name": "version", "type": "long", "doc": "Version of the partner after the change: consumers ignore events older than the copy they have" },
+    { "name": "fullName", "type": "string" },
+    { "name": "phone", "type": ["null", "string"], "default": null },
+    { "name": "vehicleType", "type": ["null", "string"], "default": null, "doc": "BICYCLE, SCOOTER, MOTORCYCLE or CAR; null until the partner fills in the profile" },
+    { "name": "vehicleNumber", "type": ["null", "string"], "default": null },
+    { "name": "city", "type": ["null", "string"], "default": null, "doc": "Deliveries are offered from restaurants in this city" },
+    { "name": "accountStatus", "type": "string", "doc": "ACTIVE or SUSPENDED (an admin decision; a suspended partner gets no deliveries)" },
+    { "name": "suspensionReason", "type": ["null", "string"], "default": null }
+  ]
+}

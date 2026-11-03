@@ -1,0 +1,1084 @@
+{
+    "uid":  "fd-services",
+    "title":  "Food Delivery - Services",
+    "description":  "Traffic, errors, response times, JVM, database, Kafka and resilience of every service",
+    "tags":  [
+                 "food-delivery"
+             ],
+    "schemaVersion":  39,
+    "version":  1,
+    "editable":  true,
+    "graphTooltip":  1,
+    "time":  {
+                 "to":  "now",
+                 "from":  "now-1h"
+             },
+    "refresh":  "30s",
+    "templating":  {
+                       "list":  [
+                                    {
+                                        "refresh":  2,
+                                        "definition":  "label_values(http_server_requests_seconds_count, application)",
+                                        "type":  "query",
+                                        "includeAll":  true,
+                                        "label":  "Service",
+                                        "datasource":  {
+                                                           "type":  "prometheus",
+                                                           "uid":  "prometheus"
+                                                       },
+                                        "sort":  1,
+                                        "name":  "service",
+                                        "multi":  true,
+                                        "query":  {
+                                                      "refId":  "service",
+                                                      "query":  "label_values(http_server_requests_seconds_count, application)"
+                                                  },
+                                        "current":  {
+                                                        "text":  "All",
+                                                        "value":  "$__all"
+                                                    }
+                                    }
+                                ]
+                   },
+    "panels":  [
+                   {
+                       "type":  "row",
+                       "title":  "Health and traffic",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  0,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Services up",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "up",
+                                           "expr":  "sum(up{job=\"services\"})",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "Services Prometheus can scrape (of 11)"
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Requests per second",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  4
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "sum(rate(http_server_requests_seconds_count{application=~\"$service\", uri!~\"/actuator.*\"}[1m]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "reqps"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Server errors (5xx)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  8
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "(sum(rate(http_server_requests_seconds_count{application=~\"$service\", status=~\"5..\", uri!~\"/actuator.*\"}[5m])) or vector(0)) / sum(rate(http_server_requests_seconds_count{application=~\"$service\", uri!~\"/actuator.*\"}[5m]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "percentunit"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "Share of answers with status 5xx (last 5 minutes)"
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Response time p95",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application=~\"$service\", uri!~\"/actuator.*\"}[5m])))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "s"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   }
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Elasticsearch",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  16
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "elasticsearch_cluster_health_status{color=\"green\"}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short",
+                                                            "mappings":  [
+                                                                             {
+                                                                                 "options":  {
+                                                                                                 "0":  {
+                                                                                                           "text":  "DOWN",
+                                                                                                           "color":  "red"
+                                                                                                       },
+                                                                                                 "1":  {
+                                                                                                           "text":  "UP",
+                                                                                                           "color":  "green"
+                                                                                                       }
+                                                                                             },
+                                                                                 "type":  "value"
+                                                                             }
+                                                                         ]
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "Cluster health green (search-service\u0027s indexes)"
+                   },
+                   {
+                       "type":  "stat",
+                       "title":  "Redis",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  1,
+                                       "w":  4,
+                                       "h":  4,
+                                       "x":  20
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "",
+                                           "expr":  "redis_up",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "short",
+                                                            "mappings":  [
+                                                                             {
+                                                                                 "options":  {
+                                                                                                 "0":  {
+                                                                                                           "text":  "DOWN",
+                                                                                                           "color":  "red"
+                                                                                                       },
+                                                                                                 "1":  {
+                                                                                                           "text":  "UP",
+                                                                                                           "color":  "green"
+                                                                                                       }
+                                                                                             },
+                                                                                 "type":  "value"
+                                                                             }
+                                                                         ]
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "textMode":  "auto",
+                                       "colorMode":  "value",
+                                       "graphMode":  "area",
+                                       "reduceOptions":  {
+                                                             "values":  false,
+                                                             "calcs":  [
+                                                                           "lastNotNull"
+                                                                       ],
+                                                             "fields":  ""
+                                                         }
+                                   },
+                       "description":  "Cache and rate limits"
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Requests per second by service",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  5,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "sum by (application) (rate(http_server_requests_seconds_count{application=~\"$service\", uri!~\"/actuator.*\"}[1m]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "reqps"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Answers by status",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  5,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{status}}",
+                                           "expr":  "sum by (status) (rate(http_server_requests_seconds_count{application=~\"$service\", uri!~\"/actuator.*\"}[1m]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "reqps"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Response time p95 by service",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  13,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "histogram_quantile(0.95, sum by (le, application) (rate(http_server_requests_seconds_bucket{application=~\"$service\", uri!~\"/actuator.*\"}[5m])))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "s"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Slowest endpoints (p95)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  13,
+                                       "w":  12,
+                                       "h":  8,
+                                       "x":  12
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}} {{method}} {{uri}}",
+                                           "expr":  "topk(5, histogram_quantile(0.95, sum by (le, application, method, uri) (rate(http_server_requests_seconds_bucket{application=~\"$service\", uri!~\"/actuator.*\"}[5m]))))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "s"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "JVM",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  21,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Heap used",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  22,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "sum by (application) (jvm_memory_used_bytes{area=\"heap\", application=~\"$service\"})",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "bytes"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "CPU (process)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  22,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  8
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "process_cpu_usage{application=~\"$service\"}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "percentunit"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Live threads",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  22,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  16
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "jvm_threads_live_threads{application=~\"$service\"}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "Database, Kafka and resilience",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  30,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Database connections in use / waiting",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  31,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}} in use",
+                                           "expr":  "sum by (application) (hikaricp_connections_active{application=~\"$service\"})",
+                                           "refId":  "A"
+                                       },
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}} waiting",
+                                           "expr":  "sum by (application) (hikaricp_connections_pending{application=~\"$service\"})",
+                                           "refId":  "B"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Kafka consumer lag (max)",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  31,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  8
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "max by (application) (kafka_consumer_fetch_manager_records_lag_max{application=~\"$service\"})",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   },
+                       "description":  "Events not yet read by the slowest consumer of each service"
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Kafka producer errors",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  31,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  16
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "sum by (application) (rate(kafka_producer_record_error_total{application=~\"$service\"}[5m]))",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Outbox: events waiting to be sent",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  39,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}}",
+                                           "expr":  "outbox_events_waiting{application=~\"$service\"}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   },
+                       "description":  "Grows while Kafka is unreachable; drains when it is back"
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Events sent per minute by topic",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  39,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  8
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{topic}}",
+                                           "expr":  "sum by (topic) (rate(outbox_events_published_total{application=~\"$service\"}[5m])) * 60",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "title":  "Circuit breakers not closed",
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "prometheus"
+                                      },
+                       "gridPos":  {
+                                       "y":  39,
+                                       "w":  8,
+                                       "h":  8,
+                                       "x":  16
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "prometheus",
+                                                              "uid":  "prometheus"
+                                                          },
+                                           "legendFormat":  "{{application}} -\u003e {{name}}: {{state}}",
+                                           "expr":  "sum by (application, name, state) (resilience4j_circuitbreaker_state{state!=\"closed\", application=~\"$service\"}) \u003e 0",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "custom":  {
+                                                                           "lineWidth":  1,
+                                                                           "showPoints":  "never",
+                                                                           "fillOpacity":  10
+                                                                       },
+                                                            "unit":  "short"
+                                                        },
+                                           "overrides":  [
+
+                                                         ]
+                                       },
+                       "options":  {
+                                       "legend":  {
+                                                      "placement":  "bottom",
+                                                      "showLegend":  true,
+                                                      "displayMode":  "list"
+                                                  },
+                                       "tooltip":  {
+                                                       "sort":  "desc",
+                                                       "mode":  "multi"
+                                                   }
+                                   },
+                       "description":  "A line here: calls to that service are being turned away"
+                   },
+                   {
+                       "type":  "row",
+                       "title":  "Logs",
+                       "collapsed":  false,
+                       "gridPos":  {
+                                       "y":  47,
+                                       "w":  24,
+                                       "h":  1,
+                                       "x":  0
+                                   },
+                       "panels":  [
+
+                                  ]
+                   },
+                   {
+                       "type":  "logs",
+                       "title":  "Warnings and errors",
+                       "datasource":  {
+                                          "type":  "loki",
+                                          "uid":  "loki"
+                                      },
+                       "gridPos":  {
+                                       "y":  48,
+                                       "w":  24,
+                                       "h":  10,
+                                       "x":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "datasource":  {
+                                                              "type":  "loki",
+                                                              "uid":  "loki"
+                                                          },
+                                           "expr":  "{service=~\"$service\", level=~\"WARN|ERROR\"}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "options":  {
+                                       "sortOrder":  "Descending",
+                                       "showTime":  true,
+                                       "enableLogDetails":  true,
+                                       "wrapLogMessage":  true
+                                   }
+                   }
+               ]
+}

@@ -1,0 +1,137 @@
+package com.fooddelivery.userservice.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Optional;
+
+import com.fooddelivery.userservice.config.AppProperties;
+import com.fooddelivery.userservice.dto.request.AddressRequest;
+import com.fooddelivery.userservice.dto.response.AddressResponse;
+import com.fooddelivery.userservice.entity.Address;
+import com.fooddelivery.userservice.entity.AddressType;
+import com.fooddelivery.userservice.exception.AddressNotFoundException;
+import com.fooddelivery.userservice.exception.BusinessRuleException;
+import com.fooddelivery.userservice.mapper.AddressMapper;
+import com.fooddelivery.userservice.repository.AddressRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class AddressServiceTest {
+
+    private static final Long USER_ID = 1L;
+    private static final int MAX_ADDRESSES = 2;
+
+    @Mock
+    private AddressRepository addressRepository;
+
+    @Mock
+    private UserProfileService userProfileService;
+
+    private AddressService addressService;
+
+    @BeforeEach
+    void setUp() {
+        AppProperties appProperties = new AppProperties("Asia/Kolkata",
+                new AppProperties.BootstrapAdmin(null, null, "Admin"),
+                new AppProperties.Addresses(MAX_ADDRESSES));
+        addressService = new AddressService(addressRepository, userProfileService, new AddressMapper(), appProperties);
+    }
+
+    @Test
+    void firstAddressBecomesDefault() {
+        when(addressRepository.findByUserIdOrderByCreatedAtDesc(USER_ID)).thenReturn(List.of());
+        when(addressRepository.save(any(Address.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AddressResponse response = addressService.addAddress(USER_ID, request(null));
+
+        assertThat(response.defaultAddress()).isTrue();
+    }
+
+    @Test
+    void newDefaultAddressRemovesDefaultFromPreviousOne() {
+        Address previousDefault = address(10L, true);
+        when(addressRepository.findByUserIdOrderByCreatedAtDesc(USER_ID)).thenReturn(List.of(previousDefault));
+        when(addressRepository.save(any(Address.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AddressResponse response = addressService.addAddress(USER_ID, request(true));
+
+        assertThat(response.defaultAddress()).isTrue();
+        assertThat(previousDefault.isDefaultAddress()).isFalse();
+    }
+
+    @Test
+    void secondAddressIsNotDefaultUnlessRequested() {
+        Address existingDefault = address(10L, true);
+        when(addressRepository.findByUserIdOrderByCreatedAtDesc(USER_ID)).thenReturn(List.of(existingDefault));
+        when(addressRepository.save(any(Address.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AddressResponse response = addressService.addAddress(USER_ID, request(null));
+
+        assertThat(response.defaultAddress()).isFalse();
+        assertThat(existingDefault.isDefaultAddress()).isTrue();
+    }
+
+    @Test
+    void cannotAddMoreThanTheMaximumNumberOfAddresses() {
+        when(addressRepository.findByUserIdOrderByCreatedAtDesc(USER_ID))
+                .thenReturn(List.of(address(10L, true), address(11L, false)));
+
+        var request = request(null);
+        assertThatThrownBy(() -> addressService.addAddress(USER_ID, request))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("at most " + MAX_ADDRESSES);
+        verify(addressRepository, never()).save(any());
+    }
+
+    @Test
+    void deletingDefaultAddressPromotesMostRecentRemainingAddress() {
+        Address defaultAddress = address(10L, true);
+        Address newestRemaining = address(12L, false);
+        Address olderRemaining = address(11L, false);
+        when(addressRepository.findByIdAndUserId(10L, USER_ID)).thenReturn(Optional.of(defaultAddress));
+        when(addressRepository.findByUserIdOrderByCreatedAtDesc(USER_ID)).thenReturn(List.of(newestRemaining, olderRemaining));
+
+        addressService.deleteAddress(USER_ID, 10L);
+
+        verify(addressRepository).delete(defaultAddress);
+        assertThat(newestRemaining.isDefaultAddress()).isTrue();
+        assertThat(olderRemaining.isDefaultAddress()).isFalse();
+    }
+
+    @Test
+    void addressOfAnotherUserIsNotFound() {
+        when(addressRepository.findByIdAndUserId(99L, USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> addressService.deleteAddress(USER_ID, 99L))
+                .isInstanceOf(AddressNotFoundException.class);
+    }
+
+    private static AddressRequest request(Boolean makeDefault) {
+        return new AddressRequest(AddressType.HOME, "12 MG Road", null, "Bengaluru", "Karnataka",
+                "560001", "India", null, null, makeDefault);
+    }
+
+    private static Address address(Long id, boolean isDefault) {
+        Address address = new Address();
+        address.setId(id);
+        address.setUserId(USER_ID);
+        address.setType(AddressType.HOME);
+        address.setLine1("Line " + id);
+        address.setCity("Bengaluru");
+        address.setState("Karnataka");
+        address.setPostalCode("560001");
+        address.setCountry("India");
+        address.setDefaultAddress(isDefault);
+        return address;
+    }
+}

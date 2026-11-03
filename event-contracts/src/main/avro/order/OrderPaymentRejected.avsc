@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "OrderPaymentRejected",
+  "namespace": "com.fooddelivery.events.order",
+  "doc": "A payment succeeded for an order that no longer accepts payment (cancelled or expired meanwhile): the money must be returned. Producer: order-service. Consumer: payment-service (refunds it). Topic: fooddelivery.order.payment-rejected (key: orderId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "orderId", "type": "long" },
+    { "name": "paymentId", "type": "long" },
+    { "name": "orderStatus", "type": "string", "doc": "The order's status when the payment arrived, e.g. CANCELLED" },
+    { "name": "reason", "type": "string" }
+  ]
+}

@@ -1,0 +1,60 @@
+package com.fooddelivery.searchservice.service;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import com.fooddelivery.searchservice.dto.response.ConsistencyReport;
+import com.fooddelivery.searchservice.exception.SourceUnavailableException;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+/**
+ * Compares the indexes with MySQL every few hours and publishes the number of differing documents per index as
+ * a metric (search_index_drift_documents), so Prometheus can alert on it. It only looks; repairing is an admin's
+ * decision (POST /api/v1/admin/search/consistency/repair).
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.consistency-check", name = "enabled", havingValue = "true", matchIfMissing = true)
+public class ConsistencyMonitor {
+
+    private final ConsistencyService consistencyService;
+    private final MeterRegistry meterRegistry;
+    private final Map<String, AtomicLong> drift = new ConcurrentHashMap<>();
+
+    @Scheduled(initialDelayString = "${app.consistency-check.initial-delay:5m}",
+            fixedDelayString = "${app.consistency-check.interval:6h}")
+    public void check() {
+        try {
+            ConsistencyReport report = consistencyService.check();
+            report.indexes().forEach(index -> gauge(index.index()).set(
+                    index.missing() + index.stale() + index.ahead() + index.orphans() + index.orphansUnconfirmed()));
+            if (report.consistent()) {
+                log.info("Search indexes match MySQL.");
+            }
+        } catch (SourceUnavailableException e) {
+            // The next check tries again; the metric keeps its last value
+            log.warn("Search index check skipped: {}", e.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Search index check failed: {}", e.toString());
+        }
+    }
+
+    private AtomicLong gauge(String index) {
+        return drift.computeIfAbsent(index, name -> {
+            AtomicLong value = new AtomicLong();
+            Gauge.builder("search.index.drift.documents", value, AtomicLong::get)
+                    .description("Documents that differ between an Elasticsearch index and MySQL")
+                    .tag("index", name)
+                    .register(meterRegistry);
+            return value;
+        });
+    }
+}

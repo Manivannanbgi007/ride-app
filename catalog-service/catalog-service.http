@@ -1,0 +1,318 @@
+### Food Delivery Platform - Catalog Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Prerequisite: run restaurant-service.http first, so the owner below has a restaurant
+### (it must be ACTIVE for the customer menu in step 12).
+###
+### Caller identity: the access token of a sign-in below (Authorization: Bearer); its role must be
+###   RESTAURANT_ADMIN for /restaurants/mine/**, PLATFORM_ADMIN for /admin/**
+
+@gateway = http://localhost:8080
+
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@restaurantId = {{myRestaurants.response.body.$[0].id}}
+@itemId = {{createBiryani.response.body.$.id}}
+@itemVersion = {{readItem.response.body.$.version}}
+@newCategoryId = {{createCategory.response.body.$.id}}
+
+# Seeded category ids (Flyway V4): 1 Pizza, 2 Burgers, 3 Biryani, 4 Chinese,
+# 5 South Indian, 6 North Indian, 7 Desserts, 8 Beverages
+
+
+### ============================ CUSTOMERS ============================
+
+### 1. Food categories (active, in display order)
+GET {{gateway}}/api/v1/categories
+
+
+### ============================ OWNER: MENU ============================
+
+### 2. Log in as the restaurant owner -> ownerToken
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{ownerEmail}}",
+  "password": "{{ownerPassword}}"
+}
+
+### 3. My restaurants -> restaurantId (first one)
+# @name myRestaurants
+GET {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+
+### 4. Add a dish -> itemId
+# @name createBiryani
+POST {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "Chicken Dum Biryani",
+  "description": "Slow-cooked Hyderabadi dum biryani with raita",
+  "price": 299.00,
+  "categoryId": 3,
+  "foodType": "NON_VEG",
+  "imageUrl": "https://images.example.com/spice-hub/chicken-biryani.jpg",
+  "ingredients": "Basmati rice, chicken, curd, spices",
+  "nutritionInfo": "Calories 450 kcal, Protein 20 g"
+}
+
+### 5. Add more dishes
+POST {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Veg Biryani", "price": 219.00, "categoryId": 3, "foodType": "VEG" }
+
+###
+POST {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Double Ka Meetha", "price": 129.00, "categoryId": 7, "foodType": "VEG" }
+
+###
+POST {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Egg Biryani", "price": 189.00, "categoryId": 3, "foodType": "EGG" }
+
+### 6. Same dish name again (409)
+POST {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "name": "Chicken Dum Biryani", "price": 279.00, "categoryId": 3, "foodType": "NON_VEG" }
+
+### 7. My whole menu (every status), ordered by category
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items
+Authorization: Bearer {{ownerToken}}
+
+### 8. Read one item -> itemVersion (run before steps 9 and 10)
+# @name readItem
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}
+Authorization: Bearer {{ownerToken}}
+
+### 9. Change the price (with the version you read)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/price
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "price": 319.00, "version": {{itemVersion}} }
+
+### 10. Same request again with the old version (409, optimistic locking)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/price
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "price": 289.00, "version": {{itemVersion}} }
+
+### 11. Sold out for today (stays on the menu, greyed out)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/availability
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "available": false }
+
+### 12. Customer menu: grouped by category, sold-out items have available=false
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}/menu
+
+### 13. Back in stock
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/availability
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{ "available": true }
+
+### 14. Hide the item from the menu, then show it again
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/disable
+Authorization: Bearer {{ownerToken}}
+
+###
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/enable
+Authorization: Bearer {{ownerToken}}
+
+
+### ======================== ADMIN: CATEGORIES ========================
+
+### 15. Log in as the platform admin -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+### 16. All categories with how many menu items use each
+GET {{gateway}}/api/v1/admin/categories
+Authorization: Bearer {{adminToken}}
+
+### 17. Create a category (goes to the end of the order) -> newCategoryId
+# @name createCategory
+POST {{gateway}}/api/v1/admin/categories
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Rolls & Wraps",
+  "description": "Kathi rolls, shawarma and wraps"
+}
+
+### 18. Rename it
+PUT {{gateway}}/api/v1/admin/categories/{{newCategoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Rolls",
+  "description": "Kathi rolls and wraps"
+}
+
+### 19. Reorder: every category id once, in the new order (new category second)
+PUT {{gateway}}/api/v1/admin/categories/order
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "categoryIds": [3, {{newCategoryId}}, 1, 2, 4, 5, 6, 7, 8] }
+
+### 20. A category in use cannot be deleted (409): Biryani has items
+DELETE {{gateway}}/api/v1/admin/categories/3?reason=Test
+Authorization: Bearer {{adminToken}}
+
+### 21. Deactivate the new category (hidden from customers, cannot be chosen for items)
+PUT {{gateway}}/api/v1/admin/categories/{{newCategoryId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Not launching rolls this quarter" }
+
+### 22. Delete the unused category (204)
+DELETE {{gateway}}/api/v1/admin/categories/{{newCategoryId}}?reason=Created%20by%20mistake
+Authorization: Bearer {{adminToken}}
+
+### 23. Category audit history (kept even after deletion)
+GET {{gateway}}/api/v1/admin/categories/{{newCategoryId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+
+### ======================== ADMIN: MENU ITEMS ========================
+
+### 24. Items of one restaurant
+GET {{gateway}}/api/v1/admin/menu-items?restaurantId={{restaurantId}}
+Authorization: Bearer {{adminToken}}
+
+### 25. Price review: expensive items first
+GET {{gateway}}/api/v1/admin/menu-items?minPrice=250&sort=price,desc
+Authorization: Bearer {{adminToken}}
+
+### 26. Availability review: everything sold out right now
+GET {{gateway}}/api/v1/admin/menu-items?available=false
+Authorization: Bearer {{adminToken}}
+
+### 26a. Add an item to any restaurant (listed and available, same rules as the owner)
+# @name adminCreateItem
+POST {{gateway}}/api/v1/admin/menu-items
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "restaurantId": {{restaurantId}}, "name": "Admin Special Biryani", "price": 349.00, "categoryId": 3, "foodType": "NON_VEG" }
+
+### 26b. Edit it (send the version you last read; status and availability stay)
+PUT {{gateway}}/api/v1/admin/menu-items/{{adminCreateItem.response.body.$.id}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "name": "Admin Special Biryani", "price": 369.00, "categoryId": 3, "foodType": "NON_VEG", "version": {{adminCreateItem.response.body.$.version}} }
+
+### 26c. Duplicate it (the copy is DISABLED, named "... (copy)")
+POST {{gateway}}/api/v1/admin/menu-items/{{adminCreateItem.response.body.$.id}}/duplicate
+Authorization: Bearer {{adminToken}}
+
+### 26d. Categories with the most items and their orderable share (limit 1..12, default 3)
+GET {{gateway}}/api/v1/admin/menu-items/category-stats?limit=3
+Authorization: Bearer {{adminToken}}
+
+### 27. Block an item (the owner cannot re-enable it)
+PUT {{gateway}}/api/v1/admin/menu-items/{{itemId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Photo does not match the dish" }
+
+### 28. Owner tries to enable it (422)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/menu-items/{{itemId}}/enable
+Authorization: Bearer {{ownerToken}}
+
+### 29. Admin releases it
+PUT {{gateway}}/api/v1/admin/menu-items/{{itemId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Owner uploaded a correct photo" }
+
+### 30. Move an item to another category
+PUT {{gateway}}/api/v1/admin/menu-items/{{itemId}}/category
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "categoryId": 6, "reason": "Testing a category move" }
+
+### 31. Removing a live (ACTIVE) item is refused (409): block it first
+DELETE {{gateway}}/api/v1/admin/menu-items/{{itemId}}?reason=Test
+Authorization: Bearer {{adminToken}}
+
+### 32. Item audit history
+GET {{gateway}}/api/v1/admin/menu-items/{{itemId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= EVENTS (Kafka, Phase 7) =======================
+### catalog-service keeps its own copy of each restaurant (owner, name, status) from RestaurantChanged
+### events, so menus keep working while restaurant-service is down. Try it:
+###   docker compose stop restaurant-service
+###   run the request below (still 200), then: docker compose start restaurant-service
+### Events that fail twice go to fooddelivery.restaurant.changed.DLT (see Kafka UI http://localhost:8090).
+
+### Customer menu, served without calling restaurant-service
+### Since Phase 12 it is also cached in Redis: the first read builds it from MySQL, the next ones come from Redis,
+### and any change to the menu, the restaurant or the categories is visible on the very next read.
+### See the cached copies: docker exec -it fd-redis redis-cli --scan --pattern "catalog:v1:*"
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}/menu
+
+### Since Phase 11 catalog-service also publishes, through its transactional outbox, for search-service:
+###   MenuItemChanged  (fooddelivery.catalog.menu-item-changed, key = menuItemId): CREATED, UPDATED, PRICE_CHANGED,
+###                    AVAILABILITY_CHANGED, STATUS_CHANGED, CATEGORY_CHANGED, REMOVED
+###   CategoryChanged  (fooddelivery.catalog.category-changed, key = categoryId): CREATED, UPDATED, STATUS_CHANGED,
+###                    REORDERED, DELETED
+### Each event carries the current state and version. To fill (or rebuild) the search index with everything that
+### already exists in MySQL, replay the current state as REPUBLISHED events (audited, changes no data):
+
+### Republish every category
+POST {{gateway}}/api/v1/admin/categories/events/republish
+Authorization: Bearer {{adminToken}}
+
+### Republish every menu item
+POST {{gateway}}/api/v1/admin/menu-items/events/republish
+Authorization: Bearer {{adminToken}}
+
+### MenuItemChanged schema in Schema Registry
+GET http://localhost:8091/subjects/fooddelivery.catalog.menu-item-changed-value/versions/latest
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8083/actuator/health
+
+### Swagger UI: http://localhost:8083/swagger-ui.html
+GET http://localhost:8083/v3/api-docs

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+
+<!-- Checks switched off for whole groups of files. A single case is justified in the code instead:
+     @SuppressWarnings("checkstyle:<check>") plus a comment saying why. -->
+<suppressions>
+    <!-- Tests may catch anything: e.g. collecting the outcome of concurrent calls -->
+    <suppress checks="IllegalCatch" files="[\\/]src[\\/]test[\\/]"/>
+
+    <!-- Test fixtures (containers, stub servers) are static final but not constants: they keep camelCase names -->
+    <suppress checks="ConstantName" files="[\\/]src[\\/]test[\\/]"/>
+
+    <!-- The @SpringBootApplication class only has main(), but Spring instantiates it as a configuration bean:
+         it cannot be final or hide its constructor -->
+    <suppress checks="HideUtilityClassConstructor" files="[\\/][A-Za-z]+Application\.java$"/>
+
+    <!-- ArchUnit reads its rules from static fields of the test class, which JUnit instantiates -->
+    <suppress checks="HideUtilityClassConstructor" files="[\\/]ArchitectureTest\.java$"/>
+</suppressions>

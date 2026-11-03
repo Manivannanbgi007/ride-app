@@ -1,0 +1,105 @@
+package com.fooddelivery.userservice.controller;
+
+import java.time.LocalDate;
+import java.util.List;
+
+import com.fooddelivery.userservice.dto.request.ChangeRoleRequest;
+import com.fooddelivery.userservice.dto.request.StatusChangeRequest;
+import com.fooddelivery.userservice.dto.request.UserSearchCriteria;
+import com.fooddelivery.userservice.dto.response.AddressResponse;
+import com.fooddelivery.userservice.dto.response.AdminUserDetailsResponse;
+import com.fooddelivery.userservice.dto.response.AdminUserSummaryResponse;
+import com.fooddelivery.userservice.dto.response.AuditLogResponse;
+import com.fooddelivery.userservice.dto.response.PageResponse;
+import com.fooddelivery.userservice.dto.response.UserStatsResponse;
+import com.fooddelivery.userservice.service.AdminUserService;
+import com.fooddelivery.userservice.service.UserStatsService;
+import com.fooddelivery.userservice.web.CallerInfo;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/** Admin user management. Access is restricted to PLATFORM_ADMIN by AdminAccessInterceptor. */
+@Tag(name = "Admin - Users", description = "Platform administrators managing users")
+@RestController
+@RequestMapping("/api/v1/admin/users")
+@RequiredArgsConstructor
+public class AdminUserController {
+
+    private final AdminUserService adminUserService;
+    private final UserStatsService userStatsService;
+
+    @Operation(summary = "List users with search, filters, paging and sorting",
+            description = "Example: ?search=priya&role=CUSTOMER&status=ACTIVE&page=0&size=20&sort=createdAt,desc")
+    @GetMapping
+    public PageResponse<AdminUserSummaryResponse> searchUsers(
+            @Valid @ParameterObject UserSearchCriteria criteria,
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
+            Pageable pageable) {
+        return adminUserService.searchUsers(criteria, pageable);
+    }
+
+    @Operation(summary = "User numbers: accounts per role and status now, sign-ups in a period (default: today)")
+    @GetMapping("/stats")
+    public UserStatsResponse getStats(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
+        return userStatsService.getStats(fromDate, toDate);
+    }
+
+    @Operation(summary = "Get user details")
+    @GetMapping("/{userId}")
+    public AdminUserDetailsResponse getUser(@PathVariable Long userId) {
+        return adminUserService.getUserDetails(userId);
+    }
+
+    @Operation(summary = "A user's addresses (default first): what the user sees under My addresses")
+    @GetMapping("/{userId}/addresses")
+    public List<AddressResponse> getUserAddresses(@PathVariable Long userId) {
+        return adminUserService.getUserAddresses(userId);
+    }
+
+    @Operation(summary = "Activate a user")
+    @PutMapping("/{userId}/activate")
+    public AdminUserDetailsResponse activateUser(@PathVariable Long userId,
+                                                 @Valid @RequestBody StatusChangeRequest request,
+                                                 CallerInfo caller) {
+        return adminUserService.activateUser(userId, request.reason(), caller);
+    }
+
+    @Operation(summary = "Deactivate a user")
+    @PutMapping("/{userId}/deactivate")
+    public AdminUserDetailsResponse deactivateUser(@PathVariable Long userId,
+                                                   @Valid @RequestBody StatusChangeRequest request,
+                                                   CallerInfo caller) {
+        return adminUserService.deactivateUser(userId, request.reason(), caller);
+    }
+
+    @Operation(summary = "Change a user's role")
+    @PutMapping("/{userId}/role")
+    public AdminUserDetailsResponse changeRole(@PathVariable Long userId,
+                                               @Valid @RequestBody ChangeRoleRequest request,
+                                               CallerInfo caller) {
+        return adminUserService.changeRole(userId, request.role(), request.reason(), caller);
+    }
+
+    @Operation(summary = "Audit history of a user (newest first)")
+    @GetMapping("/{userId}/audit-logs")
+    public PageResponse<AuditLogResponse> getUserAuditLogs(@PathVariable Long userId,
+                                                           @ParameterObject @PageableDefault(size = 20) Pageable pageable) {
+        return adminUserService.getUserAuditLogs(userId, pageable);
+    }
+}

@@ -1,0 +1,54 @@
+{
+  "type": "record",
+  "name": "OrderCreated",
+  "namespace": "com.fooddelivery.events.order",
+  "doc": "A customer placed an order. Online-payment orders wait for payment (PAYMENT_PENDING); cash-on-delivery orders go straight to the restaurant (PLACED). Producer: order-service. Topic: fooddelivery.order.created (key: orderId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "orderId", "type": "long" },
+    { "name": "customerId", "type": "long" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "status", "type": "string", "doc": "PAYMENT_PENDING or PLACED" },
+    { "name": "paymentMethod", "type": "string", "doc": "CARD, UPI, WALLET or CASH_ON_DELIVERY" },
+    { "name": "items", "type": { "type": "array", "items": {
+        "type": "record",
+        "name": "OrderCreatedItem",
+        "fields": [
+          { "name": "menuItemId", "type": "long" },
+          { "name": "name", "type": "string" },
+          { "name": "quantity", "type": "int" },
+          { "name": "unitPrice", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } }
+        ]
+      } } },
+    { "name": "itemsTotal", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "deliveryFee", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "taxAmount", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "totalAmount", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "currency", "type": "string" },
+    { "name": "restaurantName", "type": ["null", "string"], "default": null, "doc": "Added in 1.3.0 (null in older events)" },
+    { "name": "customerName", "type": ["null", "string"], "default": null, "doc": "Added in 1.3.0: for the delivery partner" },
+    { "name": "customerPhone", "type": ["null", "string"], "default": null, "doc": "Added in 1.3.0: for the delivery partner" },
+    { "name": "deliveryAddress", "default": null, "doc": "Added in 1.3.0: where the delivery partner brings the food (null in older events)",
+      "type": ["null", {
+        "type": "record",
+        "name": "OrderDeliveryAddress",
+        "fields": [
+          { "name": "line1", "type": "string" },
+          { "name": "line2", "type": ["null", "string"], "default": null },
+          { "name": "city", "type": "string" },
+          { "name": "state", "type": "string" },
+          { "name": "postalCode", "type": "string" },
+          { "name": "country", "type": "string" },
+          { "name": "latitude", "type": ["null", "double"], "default": null },
+          { "name": "longitude", "type": ["null", "double"], "default": null }
+        ]
+      }] },
+    { "name": "couponCode", "type": ["null", "string"], "default": null, "doc": "Added in 1.5.0: the coupon used for this order" },
+    { "name": "discountAmount", "type": ["null", { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 }],
+      "default": null, "doc": "Added in 1.5.0: discount taken off the items (totalAmount is already after it)" },
+    { "name": "couponReservationId", "type": ["null", "long"], "default": null,
+      "doc": "Added in 1.5.0: the coupon use promotion-service reserved at checkout" }
+  ]
+}

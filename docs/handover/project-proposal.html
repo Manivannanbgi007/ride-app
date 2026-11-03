@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Food Delivery Platform · Project Proposal</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ================================================================ COVER -->
+<section class="cover">
+  <div class="cover-band">
+    <div class="cover-kicker">Project Proposal</div>
+    <h1>Food Delivery Platform</h1>
+    <p class="cover-sub">A cloud-ready, event-driven microservices platform for online food ordering, restaurant
+      operations and last-mile delivery.</p>
+    <div class="cover-tags">
+      <span>Java 21 · Spring Boot 4</span><span>16 microservices</span><span>Apache Kafka</span>
+      <span>React 19</span><span>MySQL · Redis · Elasticsearch</span><span>Docker</span><span>AI assistant</span>
+    </div>
+  </div>
+  <div class="cover-abstract">
+    <div><b>Architecture</b><span>An API gateway, 13 domain services and 2 AI services, each with its own data, integrated
+      through Kafka events.</span></div>
+    <div><b>Security and operations</b><span>Role-based access with JWT, resilience patterns, metrics, logs and traces,
+      automated quality gates.</span></div>
+    <div><b>Delivery</b><span>18 reviewed phases, five environments, containerised services and a CI/CD path to a managed
+      cloud.</span></div>
+  </div>
+  <dl class="cover-meta">
+    <div><dt>Document</dt><dd>Project Proposal: architecture, technology, security and deployment</dd></div>
+    <div><dt>Version</dt><dd>1.0 · 14 October 2026</dd></div>
+    <div><dt>Intended readers</dt><dd>Client stakeholders, solution architects, developers, DevOps engineers</dd></div>
+    <div><dt>Status</dt><dd>Issued for review and approval</dd></div>
+    <div><dt>Prepared by</dt><dd>Platform engineering team</dd></div>
+    <div><dt>Companion document</dt><dd>Development Completion Document (technical handover)</dd></div>
+  </dl>
+</section>
+
+<!-- ================================================================ CONTENTS -->
+<h1 style="break-before: auto">Contents</h1>
+<ol class="toc">
+  <li><b>1</b> Executive summary</li>
+  <li><b>2</b> Business context and objectives</li>
+  <li><b>3</b> Scope and user roles</li>
+  <li><b>4</b> Proposed solution architecture</li>
+  <li><b>5</b> Microservices</li>
+  <li><b>6</b> Communication patterns</li>
+  <li><b>7</b> Data architecture</li>
+  <li><b>8</b> Technology stack</li>
+  <li><b>9</b> Infrastructure</li>
+  <li><b>10</b> Security architecture</li>
+  <li><b>11</b> Resilience and non-functional requirements</li>
+  <li><b>12</b> Observability</li>
+  <li><b>13</b> Quality assurance and testing strategy</li>
+  <li><b>14</b> Deployment strategy</li>
+  <li><b>15</b> Delivery plan</li>
+  <li><b>16</b> Risks and mitigations</li>
+  <li><b>17</b> Assumptions and next steps</li>
+</ol>
+
+<div class="callout note" style="margin-top: 8mm">
+  <div class="callout-title">How to read this document</div>
+  <p>Sections 1 to 3 describe the business case and are written for every reader. Sections 4 to 9 describe the
+    proposed technical solution. Sections 10 to 14 cover security, quality and operations, and are of most interest to
+    architects and DevOps engineers. Sections 15 to 17 cover the delivery plan, risks and next steps.</p>
+</div>
+
+<!-- ================================================================ 1 -->
+<h1><span class="num">1</span>Executive summary</h1>
+
+<p class="lead">We propose to build the Food Delivery Platform as a set of small, independently deployable services
+  that communicate through a central API gateway and an event backbone. Customers order food from local restaurants,
+  restaurants manage their menus and orders, delivery partners carry orders to the customer's door, and platform
+  administrators supervise the whole marketplace.</p>
+
+<p>A microservices architecture is proposed because the platform has several clearly separate business domains
+  (users, restaurants, menus, orders, payments, deliveries, notifications, search) that change at different speeds,
+  carry different loads and have different reliability needs. Splitting them lets each domain be built, tested,
+  scaled and released on its own, and keeps a failure in one area (for example the search index) from stopping the
+  others (for example checkout).</p>
+
+<div class="kpis">
+  <div class="kpi"><b>16</b><span>Spring Boot applications: gateway, 13 domain services, 2 AI services</span></div>
+  <div class="kpi"><b>4</b><span>user roles, each with its own web area</span></div>
+  <div class="kpi"><b>12</b><span>databases: one per service that stores data</span></div>
+  <div class="kpi"><b>18</b><span>delivery phases, each one reviewed before the next starts</span></div>
+</div>
+
+<h2>Key features of the proposal</h2>
+<ul>
+  <li><strong>One entry point.</strong> All traffic enters through an API gateway that routes requests, limits abusive
+    traffic and protects services that are temporarily unavailable.</li>
+  <li><strong>Event-driven integration.</strong> Services publish business events (an order was created, a payment
+    succeeded, a delivery was picked up) to Apache Kafka. Other services react to those events instead of calling each
+    other, which keeps them loosely coupled.</li>
+  <li><strong>Reliable by design.</strong> A transactional outbox guarantees that a change and its event are saved
+    together; a choreographed saga coordinates checkout, payment, refunds and delivery without a central coordinator.</li>
+  <li><strong>Fast discovery.</strong> Restaurant and dish search runs on Elasticsearch, kept up to date from events, with
+    typo-tolerant matching and filters.</li>
+  <li><strong>Built for operations.</strong> Metrics, logs and distributed traces are part of every service from the
+    start, with ready-made dashboards.</li>
+  <li><strong>Quality gates.</strong> Unit, integration and end-to-end tests, architecture rules and static analysis run
+    on every build.</li>
+  <li><strong>AI assistance.</strong> A role-aware conversational assistant (Spring AI with a locally hosted language
+    model) answers questions about orders, menus and deliveries and can prepare actions that a person confirms.</li>
+</ul>
+
+<!-- ================================================================ 2 -->
+<h1><span class="num">2</span>Business context and objectives</h1>
+
+<h2>2.1 Context</h2>
+<p>Online food delivery connects three groups of people who all depend on the same order: the customer who pays, the
+  restaurant that cooks, and the rider who delivers. Each step has to be visible to the others in near real time, money
+  must never be taken twice or lost, and the platform operator needs to supervise restaurants, riders, refunds and
+  disputes. Demand is also uneven: lunch and dinner peaks can multiply traffic for browsing, checkout and tracking within
+  minutes.</p>
+
+<h2>2.2 Objectives</h2>
+<table>
+  <thead><tr><th style="width: 32%">Objective</th><th>How the proposal meets it</th></tr></thead>
+  <tbody>
+    <tr><td>Independent evolution of business areas</td><td>One service per domain with its own database and release cycle; contracts between services are versioned events and REST APIs.</td></tr>
+    <tr><td>Reliable money handling</td><td>Idempotent payment and refund APIs, verified payment-provider callbacks, automatic refunds for cancelled orders, and an immutable audit trail.</td></tr>
+    <tr><td>Real-time experience</td><td>Event-driven status changes pushed to browsers over WebSocket; live delivery tracking on a map.</td></tr>
+    <tr><td>Scalability at peak times</td><td>Stateless services that scale horizontally; Kafka partitions spread event processing; Redis caches hot reads.</td></tr>
+    <tr><td>Graceful degradation</td><td>Timeouts, retries, circuit breakers and fallbacks so that one slow or failed service does not take the platform down.</td></tr>
+    <tr><td>Operational visibility</td><td>Metrics, centralised logs and distributed tracing for every request, from the gateway through every service and event.</td></tr>
+    <tr><td>Maintainability</td><td>Consistent project structure, automated quality gates and documentation per service.</td></tr>
+  </tbody>
+</table>
+
+<h2>2.3 Success criteria</h2>
+<ul>
+  <li>A customer can find a restaurant, order, pay, track and receive an order end to end through the web application.</li>
+  <li>Restaurants, riders and administrators each have a working area for their daily tasks.</li>
+  <li>Every business flow is covered by automated end-to-end tests that run against the deployed platform.</li>
+  <li>The loss or slowness of one non-critical service is visible on dashboards and does not stop checkout.</li>
+</ul>
+
+<!-- ================================================================ 3 -->
+<h1><span class="num">3</span>Scope and user roles</h1>
+
+<h2>3.1 User roles</h2>
+<table>
+  <thead><tr><th style="width: 18%">Role</th><th>Main capabilities</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Customer</strong></td><td>Register and sign in; browse and search restaurants and dishes; manage a cart and delivery addresses; apply coupons; check out and pay online or cash on delivery; follow the order and its delivery live; cancel before the restaurant accepts; review delivered orders; receive notifications; chat with support.</td></tr>
+    <tr><td><strong>Restaurant owner</strong></td><td>Register as a restaurant partner and submit a restaurant for approval; manage profile, opening hours and menu (prices, availability); accept or reject incoming orders and move them through preparation; see sales, popular dishes and reviews.</td></tr>
+    <tr><td><strong>Delivery partner</strong></td><td>Register with vehicle and city; go online and offline; receive delivery offers and accept or decline them; navigate to pickup and drop-off; confirm pickup and delivery (including cash collection); see delivery history.</td></tr>
+    <tr><td><strong>Platform administrator</strong></td><td>Dashboard and reports; approve, suspend and manage restaurants, menu items, categories, users and delivery partners; manage coupons; review payments and issue refunds; reassign deliveries; read the platform-wide audit log; answer support chats.</td></tr>
+  </tbody>
+</table>
+
+<h2>3.2 In scope</h2>
+<ul>
+  <li>Back-end microservices, API gateway, event backbone and supporting infrastructure.</li>
+  <li>A responsive web application (desktop, tablet, phone) with customer, owner, partner and admin areas, in light and dark themes.</li>
+  <li>Online payments through a pluggable provider (a simulated provider for development and testing; Razorpay for real payments).</li>
+  <li>E-mail, SMS (simulated in development), push and in-app notifications.</li>
+  <li>Search, coupons, reviews, support chat and an AI assistant.</li>
+  <li>Live delivery tracking: the rider's position from the partner's browser while on the way, on the customer's tracking map.</li>
+  <li>Observability, automated testing, code-quality gates, containerisation and local deployment tooling.</li>
+  <li>Token-based authentication (JWT) as the final delivery phase.</li>
+</ul>
+
+<h2>3.3 Out of scope for this phase</h2>
+<ul>
+  <li>Native iOS and Android applications (the web application is mobile-friendly and can later be wrapped or complemented).</li>
+  <li>Background GPS from a native rider app, and route lines or arrival-time estimates on the map (they need a routing
+    service).</li>
+  <li>Rider payouts, restaurant settlements and tax invoicing.</li>
+  <li>Production cloud provisioning; the target deployment approach is proposed in section 14.</li>
+</ul>
+
+<!-- ================================================================ 4 -->
+<h1><span class="num">4</span>Proposed solution architecture</h1>
+
+<p>The platform is organised in four layers: a single web application; an API gateway; independent domain services; and
+  shared infrastructure (event backbone, databases, cache, search, observability). The figure below shows the proposed
+  components and how they connect.</p>
+
+<figure class="figure">
+  <img src="architecture.svg" alt="Architecture overview">
+  <figcaption>Figure 1. Proposed architecture: clients reach every service through the API gateway; services exchange
+    business events through Kafka; each service owns its data.</figcaption>
+</figure>
+
+<h2>4.1 Architecture principles</h2>
+<table>
+  <thead><tr><th style="width: 30%">Principle</th><th>What it means in practice</th></tr></thead>
+  <tbody>
+    <tr><td>Database per service</td><td>Each service owns its tables; no service reads another service's database. Data needed elsewhere is shared through APIs or events.</td></tr>
+    <tr><td>Single entry point</td><td>Browsers talk only to the API gateway, which hides the internal topology and applies cross-cutting protection.</td></tr>
+    <tr><td>Events for cross-domain change</td><td>When something important happens, the owning service publishes an event; interested services react. Services do not instruct each other.</td></tr>
+    <tr><td>Synchronous calls only when needed</td><td>A direct REST call is used only when a fresh answer is required to complete a request (for example, price check at checkout) and is always guarded by timeouts and circuit breakers.</td></tr>
+    <tr><td>At-least-once delivery, applied once</td><td>Events may be delivered more than once; consumers detect and skip repeats so the effect happens once.</td></tr>
+    <tr><td>Stateless services</td><td>No session state in memory; any instance can serve any request, so services scale horizontally.</td></tr>
+    <tr><td>Observable by default</td><td>Every request carries a request id and a trace context through REST calls and events.</td></tr>
+    <tr><td>Contracts first</td><td>REST APIs are versioned (<code>/api/v1</code>) and documented with OpenAPI; events are Avro schemas checked for compatibility by a schema registry.</td></tr>
+  </tbody>
+</table>
+
+<h2>4.2 Why microservices</h2>
+<p>A single large application would be simpler to start but would force every change through one release, one database
+  and one scaling unit. The proposed split follows business capabilities, so each team or developer can work on one
+  domain with a small, understandable code base. The added complexity of distribution (network failures, eventual
+  consistency, operations) is addressed explicitly by the communication patterns in section 6, the resilience measures in
+  section 11 and the observability in section 12.</p>
+
+<!-- ================================================================ 5 -->
+<h1><span class="num">5</span>Microservices</h1>
+
+<p>Thirteen domain services, the API gateway and two AI services make up the platform. Each is a separate Spring Boot
+  application with its own build, tests, container image and (where it stores data) its own MySQL database.</p>
+
+<table>
+  <thead><tr><th style="width: 20%">Service</th><th>Responsibility</th><th style="width: 19%">Data</th><th class="num" style="width: 8%">Port</th></tr></thead>
+  <tbody>
+    <tr><td><strong>API Gateway</strong></td><td>Single entry point: routing, per-service rate limiting, timeouts, retries, circuit breakers, request id, WebSocket for live updates.</td><td>Redis (rate-limit counters)</td><td class="num">8080</td></tr>
+    <tr><td><strong>User</strong></td><td>Registration, sign-in, profiles, addresses, roles and account status; bootstraps the first administrator.</td><td>user_db</td><td class="num">8081</td></tr>
+    <tr><td><strong>Restaurant</strong></td><td>Restaurant onboarding and lifecycle (pending, approved, active, suspended), profile and opening hours.</td><td>restaurant_db</td><td class="num">8082</td></tr>
+    <tr><td><strong>Catalog</strong></td><td>Global food categories and restaurant menus: dishes, prices, availability, admin blocking.</td><td>catalog_db</td><td class="num">8083</td></tr>
+    <tr><td><strong>Order</strong></td><td>Cart, checkout, order lifecycle and timeline, restaurant order handling, cancellations; owner of the checkout saga's order side.</td><td>order_db</td><td class="num">8084</td></tr>
+    <tr><td><strong>Payment</strong></td><td>Payments and refunds through a pluggable provider (simulated or Razorpay), webhooks, automatic refunds.</td><td>payment_db</td><td class="num">8085</td></tr>
+    <tr><td><strong>Notification</strong></td><td>E-mail, SMS, push and in-app inbox driven by events; live updates to browsers over WebSocket.</td><td>notification_db</td><td class="num">8086</td></tr>
+    <tr><td><strong>Delivery</strong></td><td>Deliveries and dispatch: assigning orders to available partners, offers, pickup, delivery, partner work status.</td><td>delivery_db</td><td class="num">8087</td></tr>
+    <tr><td><strong>Delivery Partner</strong></td><td>Delivery partners' registration, profile (vehicle, city) and account suspension.</td><td>delivery_partner_db</td><td class="num">8099</td></tr>
+    <tr><td><strong>Search</strong></td><td>Restaurant, dish and category search with typo tolerance, facets and filters.</td><td>Elasticsearch indexes</td><td class="num">8088</td></tr>
+    <tr><td><strong>Promotion</strong></td><td>Coupons: rules, validity, usage limits, reservation at checkout.</td><td>promotion_db</td><td class="num">8089</td></tr>
+    <tr><td><strong>Review</strong></td><td>Customer ratings and reviews of delivered orders and their dishes.</td><td>review_db</td><td class="num">8094</td></tr>
+    <tr><td><strong>Chat</strong></td><td>Support conversations between users and the platform's support team.</td><td>chat_db</td><td class="num">8096</td></tr>
+    <tr><td><strong>Admin</strong></td><td>Administrator dashboard and reports assembled from the owning services; platform-wide audit log.</td><td>admin_db</td><td class="num">8092</td></tr>
+    <tr><td><strong>AI client (BFF)</strong></td><td>The assistant's browser-facing side: verifies the caller, keeps conversations, applies limits.</td><td>Redis</td><td class="num">8097</td></tr>
+    <tr><td><strong>AI server</strong></td><td>Spring AI agent and tools; calls business APIs only through the gateway, as the user.</td><td>Redis; Ollama model</td><td class="num">8098</td></tr>
+  </tbody>
+</table>
+
+<h2>5.1 Shared libraries</h2>
+<p>One shared library, <code>event-contracts</code>, holds the Avro schemas of every business event and the topic names.
+  It is versioned and installed like any other dependency; it contains no business logic, so services remain independent.</p>
+
+<h2>5.2 Why these boundaries</h2>
+<ul>
+  <li><strong>Order and payment are separate</strong> because payments have their own provider integration, security
+    requirements and reconciliation, and must never be charged twice by a retried order request.</li>
+  <li><strong>Delivery and delivery partner are separate</strong>: who a partner is (profile, suspension) changes rarely,
+    while dispatch (who is free, who gets which order) must happen inside one database transaction to guarantee that no
+    partner receives two deliveries.</li>
+  <li><strong>Search is a read model</strong>: it owns no business data; it is rebuilt from events and can be replaced or
+    re-indexed without touching the source services.</li>
+  <li><strong>Admin owns no business data</strong>: it composes figures from the services that own them and keeps a copy of
+    every audit record for one platform-wide audit view.</li>
+</ul>
+
+<!-- ================================================================ 6 -->
+<h1><span class="num">6</span>Communication patterns</h1>
+
+<h2>6.1 Client to platform: REST through the gateway</h2>
+<ul>
+  <li>Versioned JSON APIs under <code>/api/v1</code>; administrator APIs under <code>/api/v1/admin</code>.</li>
+  <li>Errors follow RFC 9457 (<code>ProblemDetail</code>), with business messages that are safe to show to users.</li>
+  <li>Lists are paginated on the server (page, size, sort; at most 100 per page).</li>
+  <li>Every response carries an <code>X-Request-Id</code> that follows the request through all services and events.</li>
+  <li>State-changing operations that must not be repeated (placing an order, paying, refunding) take an
+    <code>Idempotency-Key</code>: a retried request returns the original result instead of acting twice.</li>
+</ul>
+
+<h2>6.2 Service to service: synchronous REST, guarded</h2>
+<p>A service calls another directly only when it needs a fresh answer to complete the current request: for example,
+  checkout confirms prices with the catalog and reserves a coupon with the promotion service. Every such call has a
+  timeout, a retry only when the connection itself failed, a circuit breaker per target service and a bulkhead limiting
+  concurrent calls (details in section 11).</p>
+
+<h2>6.3 Asynchronous events: Kafka with Avro</h2>
+<p>When a service changes something other services care about, it publishes an event. Events are defined as Avro
+  schemas and registered in Confluent Schema Registry, which rejects schema changes that would break existing consumers.
+  Each topic has three partitions; events are keyed by entity (for example the order id), so all events of one order are
+  processed in order. A consumer that cannot process an event retries it, then moves it to a dead-letter topic so the
+  stream is never blocked.</p>
+
+<table>
+  <thead><tr><th>Event (examples)</th><th>Published by</th><th>Consumed by</th></tr></thead>
+  <tbody>
+    <tr><td>UserRegistered</td><td>User</td><td>Notification, Delivery Partner</td></tr>
+    <tr><td>RestaurantChanged</td><td>Restaurant</td><td>Catalog, Notification, Delivery, Search</td></tr>
+    <tr><td>MenuItemChanged, CategoryChanged</td><td>Catalog</td><td>Search</td></tr>
+    <tr><td>OrderCreated, OrderStatusChanged, OrderCancelled</td><td>Order</td><td>Payment, Delivery, Notification, Promotion</td></tr>
+    <tr><td>PaymentStatusChanged</td><td>Payment</td><td>Order, Notification</td></tr>
+    <tr><td>DeliveryStatusChanged</td><td>Delivery</td><td>Order, Notification</td></tr>
+    <tr><td>DeliveryPartnerChanged / DeliveryPartnerStatusChanged</td><td>Delivery Partner / Delivery</td><td>Delivery / Delivery Partner</td></tr>
+    <tr><td>AdminActionAudited</td><td>Every service with admin actions</td><td>Admin</td></tr>
+    <tr><td>ChatMessageSent, ChatMessagesRead</td><td>Chat</td><td>Notification (live updates)</td></tr>
+  </tbody>
+</table>
+
+<h2>6.4 Transactional outbox and idempotent consumers</h2>
+<p>Writing to the database and publishing to Kafka are two separate systems; doing both in a request risks saving a change
+  without its event, or the other way round. The outbox pattern removes that risk: the service writes the event into its
+  own <code>outbox_events</code> table <em>in the same database transaction</em> as the change, and a relay publishes it
+  to Kafka shortly afterwards. If Kafka is unavailable, requests still succeed and events wait. Consumers record each
+  processed event id, so an event delivered twice is applied once.</p>
+<figure class="figure">
+  <img src="outbox.svg" alt="Transactional outbox">
+  <figcaption>Figure 2. Transactional outbox: a change and its event are saved together; the relay publishes later.</figcaption>
+</figure>
+
+<h2>6.5 Saga choreography for checkout</h2>
+<p>An order spans several services (order, payment, restaurant, delivery, promotion, notification). Instead of a central
+  coordinator, each service reacts to the previous step's event: order created, payment succeeded, order placed, food
+  ready, delivery assigned, picked up, delivered. Failures trigger compensating steps: a cancelled paid order is refunded
+  automatically, a coupon use is given back, a delivery is cancelled and its partner freed, and an unpaid order is
+  cancelled after a time limit.</p>
+
+<h2>6.6 Real-time updates</h2>
+<p>Browsers keep one WebSocket connection through the gateway. The notification service turns business events into small
+  live messages (order moved to preparing, delivery picked up, new support message), so pages update without polling.
+  Pages fall back to periodic refresh when the connection is lost.</p>
+
+<h2>6.7 Read models for search</h2>
+<p>The search service builds its Elasticsearch indexes from restaurant and catalog events (a CQRS-style read model).
+  MySQL remains the source of truth; a consistency check can detect and repair any drift, and indexes can be rebuilt by
+  replaying the current state.</p>
+
+<!-- ================================================================ 7 -->
+<h1><span class="num">7</span>Data architecture</h1>
+
+<table>
+  <thead><tr><th style="width: 22%">Store</th><th>Use</th><th style="width: 30%">Consistency and recovery</th></tr></thead>
+  <tbody>
+    <tr><td><strong>MySQL 8.4</strong></td><td>System of record. One database and one database user per service; schemas managed by versioned Flyway migrations shipped with each service.</td><td>ACID transactions inside a service; backups per database.</td></tr>
+    <tr><td><strong>Kafka</strong></td><td>Durable event log between services; dead-letter topics for events that cannot be processed.</td><td>Events kept for replay; consumers idempotent.</td></tr>
+    <tr><td><strong>Elasticsearch</strong></td><td>Search indexes for restaurants, dishes and categories.</td><td>Rebuilt from events; consistency check and repair.</td></tr>
+    <tr><td><strong>Redis</strong></td><td>Cache of hot reads (menus, categories, restaurant pages), rate-limit counters, AI conversations.</td><td>Disposable: the platform works without it; data can be lost and rebuilt.</td></tr>
+  </tbody>
+</table>
+
+<h2>7.1 Local copies instead of chatty calls</h2>
+<p>Where a service needs another's data frequently, it keeps a small local copy updated from events: the catalog keeps a
+  snapshot of each restaurant, payment keeps the orders awaiting payment, delivery keeps pickup and drop-off addresses.
+  This keeps menus working while the restaurant service is down, payments possible while the order service restarts,
+  and started deliveries completable during short outages.</p>
+
+<h2>7.2 Consistency model</h2>
+<p>Inside a service, data is strongly consistent. Across services the platform is eventually consistent: for example, an
+  order moves to "placed" a moment (usually well under a second) after the payment succeeds. Concurrent conflicting
+  changes are detected by optimistic locking and rejected with a clear "please retry" answer.</p>
+
+<h2>7.3 Auditing</h2>
+<p>Every administrator action (approve a restaurant, block a dish, refund a payment, reassign a delivery) is written to an
+  immutable audit table in the same transaction as the change, with who, when, why and the request id. A copy is sent to
+  the admin service for a single platform-wide audit view.</p>
+
+<!-- ================================================================ 8 -->
+<h1><span class="num">8</span>Technology stack</h1>
+
+<table>
+  <thead><tr><th style="width: 24%">Area</th><th>Technology</th><th style="width: 30%">Reason</th></tr></thead>
+  <tbody>
+    <tr><td>Language and runtime</td><td>Java 21 (LTS)</td><td>Long-term support; records, virtual threads</td></tr>
+    <tr><td>Service framework</td><td>Spring Boot 4.1, Spring Cloud 2025.1</td><td>Industry standard; production features built in</td></tr>
+    <tr><td>API gateway</td><td>Spring Cloud Gateway 5 (reactive)</td><td>Routing, filters, rate limiting, WebSocket</td></tr>
+    <tr><td>Persistence</td><td>MySQL 8.4, Spring Data JPA, Flyway</td><td>Reliable relational store; versioned migrations</td></tr>
+    <tr><td>Messaging</td><td>Apache Kafka 4.2 (KRaft), Confluent Schema Registry 8.2, Avro 1.12</td><td>Durable, ordered event log; safe schema evolution</td></tr>
+    <tr><td>Search</td><td>Elasticsearch 9.4</td><td>Full-text and faceted search</td></tr>
+    <tr><td>Cache and rate limits</td><td>Redis 8</td><td>Fast, simple, disposable</td></tr>
+    <tr><td>Resilience</td><td>Resilience4j 2.4</td><td>Timeouts, retries, circuit breakers, bulkheads, rate limiters</td></tr>
+    <tr><td>Observability</td><td>Micrometer, OpenTelemetry, Prometheus, Grafana, Loki, Tempo, Jaeger, Grafana Alloy</td><td>Metrics, logs and traces linked together</td></tr>
+    <tr><td>AI</td><td>Spring AI 2, Model Context Protocol, Ollama (local model)</td><td>Assistant without sending data to third-party AI services</td></tr>
+    <tr><td>Payments</td><td>Pluggable provider: simulated gateway, Razorpay Checkout</td><td>Test without real money; real payments via Razorpay</td></tr>
+    <tr><td>Web application</td><td>React 19, TypeScript, Vite, Redux Toolkit, TanStack Query, Tailwind CSS, Leaflet with OpenStreetMap</td><td>Modern, typed, fast; no paid map API</td></tr>
+    <tr><td>Quality</td><td>JUnit 5, Mockito, Testcontainers, ArchUnit, Checkstyle, SpotBugs, JaCoCo, SonarQube, Vitest</td><td>Automated gates on every build</td></tr>
+    <tr><td>Build and packaging</td><td>Maven (wrapper per service), Docker multi-stage images, Docker Compose</td><td>Reproducible builds; one image per service</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 9 -->
+<h1><span class="num">9</span>Infrastructure</h1>
+
+<table>
+  <thead><tr><th style="width: 26%">Component</th><th>Role</th><th style="width: 24%">Development set-up</th></tr></thead>
+  <tbody>
+    <tr><td>MySQL 8.4</td><td>Relational databases, one per service (created with dedicated users)</td><td>One container, initialised by script</td></tr>
+    <tr><td>Kafka (KRaft) + Schema Registry</td><td>Event backbone and schema governance</td><td>Single broker; topics created by the services</td></tr>
+    <tr><td>Redis</td><td>Cache, rate limits, AI conversation state</td><td>No persistence; bounded memory</td></tr>
+    <tr><td>Elasticsearch</td><td>Search indexes</td><td>Single node</td></tr>
+    <tr><td>Ollama</td><td>Local large language model for the assistant (CPU or GPU)</td><td>Bound to the local machine only</td></tr>
+    <tr><td>Mail server</td><td>Outgoing e-mail</td><td>Mailpit catches every e-mail for inspection</td></tr>
+    <tr><td>Observability stack</td><td>Prometheus, Grafana, Loki, Tempo, Jaeger, Grafana Alloy collector</td><td>Optional containers with provisioned dashboards</td></tr>
+    <tr><td>Data UIs</td><td>Kafka UI, Kibana, phpMyAdmin</td><td>Optional, development only</td></tr>
+    <tr><td>Code quality</td><td>SonarQube with PostgreSQL</td><td>Optional profile, on demand</td></tr>
+    <tr><td>Change data capture (optional)</td><td>Debezium on Kafka Connect, in shadow mode for evaluation</td><td>Optional profile</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <div class="callout-title">Resource planning</div>
+  <p>Running every service, the full observability stack and the language model on a single developer workstation
+    needs more than 16 GB of memory for containers. The proposed development set-up therefore runs the infrastructure in
+    Docker and the services as local processes, with the observability stack started only when needed. Production
+    environments size each component separately (section 14).</p>
+</div>
+
+<!-- ================================================================ 10 -->
+<h1><span class="num">10</span>Security architecture</h1>
+
+<h2>10.1 Identity and access</h2>
+<p>Security is delivered in two steps so that functional work is not blocked:</p>
+<ol>
+  <li><strong>Development phases (interim).</strong> Users sign in with e-mail and password, verified by the user service
+    (passwords stored as BCrypt hashes). The web application then sends the signed-in user's id and role in request
+    headers. This is suitable only for development and testing environments that are not exposed to the internet.</li>
+  <li><strong>Final phase: token-based security (proposed).</strong> Spring Security with JSON Web Tokens: the user service
+    (or an identity provider) issues signed access tokens; the API gateway validates every token and passes the verified
+    identity to the services; services reject requests that did not come through the gateway. Refresh tokens, token
+    expiry and sign-out are included. Because identity is resolved in one place per service, this change does not alter
+    business code.</li>
+</ol>
+
+<h2>10.2 Authorisation</h2>
+<p>Role-based access control with four roles: <code>CUSTOMER</code>, <code>RESTAURANT_ADMIN</code>,
+  <code>DELIVERY_PARTNER</code> and <code>PLATFORM_ADMIN</code>. Every service checks the role for each endpoint and
+  enforces ownership in its own business logic (an owner sees only their restaurant's orders, a partner only their own
+  deliveries, a customer only their own orders). Nobody can register as an administrator; the first administrator is
+  created from protected configuration.</p>
+
+<h2>10.3 Protection of data and transactions</h2>
+<ul>
+  <li><strong>Transport:</strong> HTTPS (TLS) at the edge in every non-local environment; internal traffic on a private network.</li>
+  <li><strong>Payments:</strong> card details never touch the platform; the provider's hosted checkout handles them. Payment
+    callbacks are accepted only after their signature is verified (HMAC) and the provider confirms the captured amount.</li>
+  <li><strong>Idempotency:</strong> orders, payments and refunds accept an idempotency key so that a retried request cannot charge or refund twice.</li>
+  <li><strong>Secrets:</strong> passwords and keys come from environment configuration (a secrets manager in production), never from source code.</li>
+  <li><strong>Input validation:</strong> every request body is validated; errors never expose stack traces or internal details.</li>
+  <li><strong>Abuse protection:</strong> per-client rate limits at the gateway, stricter limits for sign-in and registration.</li>
+  <li><strong>Auditing:</strong> immutable audit records of every administrator action, with the reason given.</li>
+</ul>
+
+<h2>10.4 AI assistant safeguards</h2>
+<ul>
+  <li>The assistant's identity comes from the verified session, never from what the user types or what the model produces.</li>
+  <li>Each role is offered only its own tools; the business services check permissions again on every call.</li>
+  <li>The model cannot change anything by itself: it can only prepare an action (place or cancel an order, accept an
+    order, mark a delivery) that the user must confirm with a button.</li>
+  <li>The language model runs locally, so conversation data is not sent to third-party AI services.</li>
+</ul>
+
+<!-- ================================================================ 11 -->
+<h1><span class="num">11</span>Resilience and non-functional requirements</h1>
+
+<h2>11.1 Resilience measures</h2>
+<table>
+  <thead><tr><th style="width: 22%">Where</th><th style="width: 22%">Pattern</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td>Service-to-service calls</td><td>Timeout</td><td>2 s to connect, 3 to 4 s to answer: no request waits forever.</td></tr>
+    <tr><td></td><td>Retry</td><td>One more attempt after 200 ms, only when the connection failed and the call is safe to repeat.</td></tr>
+    <tr><td></td><td>Circuit breaker</td><td>Opens after repeated failures or slow calls; callers get a fast "unavailable" answer while the target recovers.</td></tr>
+    <tr><td></td><td>Bulkhead</td><td>At most 20 concurrent calls to one service, so a slow dependency cannot exhaust all threads.</td></tr>
+    <tr><td>Payment provider</td><td>Rate limiter and circuit breaker, no retry</td><td>Stays within the provider's limits; a charge is never repeated automatically.</td></tr>
+    <tr><td>API gateway</td><td>Rate limit, timeouts, retry (reads only), circuit breaker, fallback</td><td>Per-service settings; a clear 503 or 504 with <code>Retry-After</code> instead of hanging.</td></tr>
+    <tr><td>Event processing</td><td>Retries and dead-letter topics</td><td>A poisonous event never blocks the stream; it is set aside for analysis.</td></tr>
+    <tr><td>Fallbacks</td><td>Degraded answers</td><td>For example: the cart still loads when coupons cannot be checked; the admin dashboard shows the figures that are available.</td></tr>
+  </tbody>
+</table>
+
+<h2>11.2 Non-functional requirements</h2>
+<table>
+  <thead><tr><th style="width: 22%">Quality</th><th>Target and approach</th></tr></thead>
+  <tbody>
+    <tr><td>Scalability</td><td>Stateless services scale horizontally behind the gateway; Kafka partitions allow parallel consumers; Redis caching for hot reads.</td></tr>
+    <tr><td>Availability</td><td>No single domain failure stops checkout (except the order and payment services themselves); multiple instances per service in production.</td></tr>
+    <tr><td>Performance</td><td>Pagination everywhere; caching of menus and categories; search offloaded to Elasticsearch; response-time percentiles monitored per endpoint.</td></tr>
+    <tr><td>Reliability</td><td>Outbox, idempotent consumers, idempotency keys and compensating actions guarantee correct outcomes despite retries and outages.</td></tr>
+    <tr><td>Maintainability</td><td>Uniform service structure, architecture rules enforced by tests, documentation and API files per service.</td></tr>
+    <tr><td>Usability and accessibility</td><td>Responsive design, light and dark themes, keyboard support and readable contrast in the web application.</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 12 -->
+<h1><span class="num">12</span>Observability</h1>
+
+<p>Every service exposes metrics, writes structured logs and takes part in distributed tracing from day one.</p>
+<table>
+  <thead><tr><th style="width: 16%">Signal</th><th>Collected with</th><th>What it answers</th></tr></thead>
+  <tbody>
+    <tr><td>Metrics</td><td>Micrometer → Prometheus</td><td>Traffic, errors and latency per endpoint; JVM and connection pools; Kafka lag; outbox backlog; circuit breakers; business counters (orders, payment failures, delivery times).</td></tr>
+    <tr><td>Logs</td><td>Container logs → Grafana Alloy → Loki</td><td>Every line carries the trace id, request id and the user, order, payment or delivery id where known.</td></tr>
+    <tr><td>Traces</td><td>OpenTelemetry → Alloy → Tempo and Jaeger</td><td>One trace per business transaction across the gateway, REST calls and Kafka events, including the outbox.</td></tr>
+    <tr><td>Dashboards</td><td>Grafana (provisioned)</td><td>"Services" (technical health) and "Business" (orders, outcomes, refunds, delivery times); links from a metric to its trace and logs.</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 13 -->
+<h1><span class="num">13</span>Quality assurance and testing strategy</h1>
+
+<div class="pyramid">
+  <div class="bar l1">End-to-end</div><p>Business flows across the running platform, through the gateway.</p>
+  <div class="bar l2">Integration</div><p>Per service, with real MySQL, Kafka, Redis and Elasticsearch (Testcontainers).</p>
+  <div class="bar l3">Slice and architecture</div><p>Web layer: access rules, validation, error format; architecture rules.</p>
+  <div class="bar l4">Unit</div><p>Business rules: state transitions, prices, limits, retries.</p>
+</div>
+
+<table>
+  <thead><tr><th style="width: 22%">Gate</th><th>What it enforces</th></tr></thead>
+  <tbody>
+    <tr><td>ArchUnit</td><td>Layering (controller → service → repository), no entities in APIs, constructor injection, no forbidden constructs.</td></tr>
+    <tr><td>Checkstyle</td><td>Code style and naming conventions shared by every service.</td></tr>
+    <tr><td>SpotBugs</td><td>Bug patterns in compiled code.</td></tr>
+    <tr><td>JaCoCo</td><td>A per-service minimum test coverage that may not drop.</td></tr>
+    <tr><td>SonarQube</td><td>A shared quality gate with history.</td></tr>
+    <tr><td>Front-end checks</td><td>Type checking, linting, formatting and component tests on every build.</td></tr>
+  </tbody>
+</table>
+<p>Each end-to-end test creates its own data (owner, restaurant, customers, partner) in its own city through the public
+  APIs, so tests are independent of existing data and of each other, and can run against any environment.</p>
+
+<!-- ================================================================ 14 -->
+<h1><span class="num">14</span>Deployment strategy</h1>
+
+<h2>14.1 Environments</h2>
+<table>
+  <thead><tr><th style="width: 18%">Environment</th><th>Purpose</th><th style="width: 34%">Characteristics</th></tr></thead>
+  <tbody>
+    <tr><td>Development</td><td>Daily development and debugging</td><td>Infrastructure in Docker, services run locally; simulated payments; mail catcher.</td></tr>
+    <tr><td>Demo</td><td>Showcasing to stakeholders</td><td>Stable data set; simulated payments.</td></tr>
+    <tr><td>UAT</td><td>Client acceptance testing</td><td>Production-like configuration; payment provider test mode; full end-to-end suite.</td></tr>
+    <tr><td>Pre-production</td><td>Final rehearsal of a release</td><td>Same topology and sizing as production; token-based security enabled.</td></tr>
+    <tr><td>Production</td><td>Live service</td><td>High availability, managed data services, monitoring and alerting.</td></tr>
+  </tbody>
+</table>
+<p>The web application is built per environment from its own configuration file (gateway address, feature flags), so
+  the same code moves through every stage.</p>
+
+<h2>14.2 Packaging</h2>
+<ul>
+  <li>Every service has a multi-stage Dockerfile: the build stage compiles and packages; the runtime stage uses a slim
+    Java runtime, a layered JAR for fast rebuilds, and runs as a non-root user.</li>
+  <li>Docker Compose describes the infrastructure and, through profiles, optional groups (services, AI, change data
+    capture, code quality). A script starts the services locally for development.</li>
+  <li>Database schemas migrate automatically at service start-up (Flyway), forward-only and backward compatible.</li>
+</ul>
+
+<h2>14.3 Proposed production topology</h2>
+<div class="callout note">
+  <div class="callout-title">Recommendation (to be confirmed with the client's hosting choice)</div>
+  <ul>
+    <li><strong>Orchestration:</strong> a managed Kubernetes service (for example AKS, EKS or GKE) with one deployment per
+      service, at least two replicas each, readiness and liveness probes on the existing health endpoints, and horizontal
+      autoscaling on CPU and request rate.</li>
+    <li><strong>Edge:</strong> an ingress controller or cloud load balancer terminating TLS in front of the API gateway; a CDN
+      for the web application's static files.</li>
+    <li><strong>Data services:</strong> managed MySQL with automated backups and point-in-time recovery; managed Kafka with
+      Schema Registry; managed Redis; managed Elasticsearch (or OpenSearch).</li>
+    <li><strong>AI model:</strong> a GPU node pool or a dedicated model host for responsive assistant answers.</li>
+    <li><strong>Secrets and configuration:</strong> a secrets manager (for example Azure Key Vault, AWS Secrets Manager or
+      HashiCorp Vault) injected as environment variables.</li>
+    <li><strong>Observability:</strong> the same Prometheus, Grafana, Loki and Tempo stack (self-hosted or a managed Grafana
+      offering) with alert rules for errors, latency, consumer lag and outbox backlog.</li>
+  </ul>
+</div>
+
+<h2>14.4 Proposed CI/CD pipeline</h2>
+<ol class="steps">
+  <li><strong>Build and test</strong> each changed service: unit, slice and integration tests, architecture rules, Checkstyle, SpotBugs, coverage.</li>
+  <li><strong>Quality gate</strong> in SonarQube; the pipeline stops on failure.</li>
+  <li><strong>Container image</strong> built once, tagged with the commit, scanned for vulnerabilities and pushed to a registry.</li>
+  <li><strong>Deploy to UAT</strong> automatically; run the end-to-end suite against it.</li>
+  <li><strong>Promote</strong> the same image to pre-production and production after approval, with rolling or blue-green
+    deployment and automatic rollback when health checks fail.</li>
+</ol>
+
+<!-- ================================================================ 15 -->
+<h1><span class="num">15</span>Delivery plan</h1>
+
+<p>The platform is delivered in phases. Each phase ends with a working, tested increment and a review before the next
+  phase starts.</p>
+<table>
+  <thead><tr><th class="num" style="width: 7%">Phase</th><th style="width: 30%">Deliverable</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td>Foundation and API gateway</td><td>Repository layout, conventions, gateway, infrastructure containers.</td></tr>
+    <tr><td class="num">2</td><td>User service</td><td>Registration, sign-in, profiles, addresses, roles, administrator bootstrap.</td></tr>
+    <tr><td class="num">3</td><td>Restaurant service</td><td>Onboarding workflow, approval, lifecycle, opening hours.</td></tr>
+    <tr><td class="num">4</td><td>Catalog service</td><td>Categories, menus, prices, availability.</td></tr>
+    <tr><td class="num">5</td><td>Order service</td><td>Cart, checkout, order lifecycle, restaurant order handling.</td></tr>
+    <tr><td class="num">6</td><td>Payment service</td><td>Payments, refunds, provider integration.</td></tr>
+    <tr><td class="num">7</td><td>Kafka and Schema Registry</td><td>Event contracts, producers and consumers.</td></tr>
+    <tr><td class="num">8</td><td>Saga and outbox</td><td>Transactional outbox, idempotent consumers, checkout saga and compensations.</td></tr>
+    <tr><td class="num">9</td><td>Notification service</td><td>E-mail, SMS, push, in-app inbox, live updates.</td></tr>
+    <tr><td class="num">10</td><td>Delivery service</td><td>Dispatch, offers, pickup and delivery, partner status.</td></tr>
+    <tr><td class="num">11</td><td>Search service</td><td>Elasticsearch indexes, search APIs, consistency repair.</td></tr>
+    <tr><td class="num">12</td><td>Redis</td><td>Caching and rate limiting.</td></tr>
+    <tr><td class="num">13</td><td>Promotions and administration</td><td>Coupons; admin dashboard, reports, platform-wide audit log.</td></tr>
+    <tr><td class="num">14</td><td>Resilience and observability</td><td>Resilience4j patterns; metrics, logs, traces, dashboards.</td></tr>
+    <tr><td class="num">15</td><td>Quality and integration testing</td><td>Quality gates; end-to-end test suite.</td></tr>
+    <tr><td class="num">16</td><td>Web application: admin area</td><td>Dashboard, orders, customers, foods, restaurants, coupons, payments, deliveries, reports, audit.</td></tr>
+    <tr><td class="num">17</td><td>Web application: customer area</td><td>Browse, search, cart, checkout, payment, orders, tracking, profile.</td></tr>
+    <tr><td class="num">18</td><td>Security</td><td>Token-based authentication and authorisation (JWT) across gateway and services.</td></tr>
+  </tbody>
+</table>
+<p>Extensions planned alongside the phases: restaurant-owner and delivery-partner web areas, a separate delivery-partner
+  service, reviews and ratings, support chat, real payment provider (Razorpay), live map tracking and the AI assistant.</p>
+
+<!-- ================================================================ 16 -->
+<h1><span class="num">16</span>Risks and mitigations</h1>
+
+<table>
+  <thead><tr><th style="width: 26%">Risk</th><th class="num" style="width: 10%">Impact</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>Complexity of a distributed system</td><td class="num">High</td><td>Uniform service structure; distributed tracing and request ids; end-to-end tests of every business flow; clear documentation.</td></tr>
+    <tr><td>Inconsistent data between services</td><td class="num">High</td><td>Transactional outbox, idempotent consumers, compensating actions, consistency checks for read models.</td></tr>
+    <tr><td>Payment errors (double charge, lost payment)</td><td class="num">High</td><td>Idempotency keys, no automatic retry of charges, verified provider callbacks, automatic refunds, audit trail.</td></tr>
+    <tr><td>Interim identity headers exposed publicly</td><td class="num">High</td><td>Interim mode only in closed environments; token-based security (phase 18) before any public deployment.</td></tr>
+    <tr><td>Event schema changes breaking consumers</td><td class="num">Medium</td><td>Schema Registry compatibility checks; versioned shared contract library.</td></tr>
+    <tr><td>Infrastructure cost and operational load</td><td class="num">Medium</td><td>Managed data services; autoscaling; optional components (observability UIs, change data capture) enabled only where needed.</td></tr>
+    <tr><td>AI answers being wrong or misleading</td><td class="num">Medium</td><td>Answers grounded in tool results only; figures checked against tool data; consequential actions always confirmed by a person.</td></tr>
+    <tr><td>Developer workstation resource limits</td><td class="num">Low</td><td>Services run locally, infrastructure in Docker, heavy tools started on demand.</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 17 -->
+<h1><span class="num">17</span>Assumptions and next steps</h1>
+
+<h2>17.1 Assumptions</h2>
+<ul>
+  <li>The client provides payment provider accounts (test and live keys) and a mail and SMS provider for production.</li>
+  <li>The hosting platform (cloud provider or on-premises) is decided before the pre-production environment is built.</li>
+  <li>The web application is the primary client; native mobile apps can reuse the same APIs later.</li>
+  <li>Real-time rider GPS requires a rider mobile application or device integration, delivered as a follow-up.</li>
+</ul>
+
+<h2>17.2 Next steps</h2>
+<ol class="steps">
+  <li>Review and approve this proposal, including the security approach and the delivery plan.</li>
+  <li>Confirm the hosting platform and managed services for UAT, pre-production and production.</li>
+  <li>Provide payment, mail and SMS provider credentials for the test environments.</li>
+  <li>Agree the acceptance criteria for each phase and the UAT schedule.</li>
+</ol>
+
+<div class="callout" style="margin-top: 8mm">
+  <div class="callout-title">Companion document</div>
+  <p>The <strong>Development Completion Document</strong> describes the platform as implemented: services, project
+    structure, interactions, workflows, configuration, testing, deployment and the completed feature set.</p>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,115 @@
+package com.fooddelivery.catalogservice.service;
+
+import com.fooddelivery.catalogservice.dto.request.AdminMenuItemCreateRequest;
+import com.fooddelivery.catalogservice.dto.request.MenuItemRequest;
+import com.fooddelivery.catalogservice.dto.response.MenuItemResponse;
+import com.fooddelivery.catalogservice.entity.AuditAction;
+import com.fooddelivery.catalogservice.entity.MenuItem;
+import com.fooddelivery.catalogservice.entity.MenuItemStatus;
+import com.fooddelivery.catalogservice.exception.InvalidRequestException;
+import com.fooddelivery.catalogservice.exception.ResourceNotFoundException;
+import com.fooddelivery.catalogservice.repository.MenuItemRepository;
+import com.fooddelivery.catalogservice.web.CallerInfo;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * A platform admin creating, editing and duplicating menu items of any restaurant. The rules are the owner rules
+ * ({@link MenuItemEditor}); only the ownership check is replaced by "the restaurant exists and is not suspended".
+ * <p>
+ * Like the owner flow, the restaurant check (possibly a remote call) runs before the database transaction.
+ * Every change is audited in the same transaction.
+ */
+@Service
+@RequiredArgsConstructor
+public class AdminMenuItemEditService {
+
+    /** Length of menu_items.name. */
+    private static final int NAME_MAX_LENGTH = 120;
+
+    private final RestaurantAccessGuard restaurantAccessGuard;
+    private final MenuItemRepository menuItemRepository;
+    private final MenuItemEditor menuItemEditor;
+    private final AdminAuditService adminAuditService;
+    private final TransactionTemplate transactionTemplate;
+
+    /** New items start like the owner ones: listed and available. */
+    public MenuItemResponse createMenuItem(AdminMenuItemCreateRequest request, CallerInfo admin) {
+        restaurantAccessGuard.requireEditableRestaurant(request.restaurantId());
+
+        return transactionTemplate.execute(transaction -> {
+            MenuItemResponse created = menuItemEditor.create(request.restaurantId(), request.toMenuItemRequest(),
+                    MenuItemStatus.ACTIVE);
+            adminAuditService.recordAction(admin, AuditAction.MENU_ITEM_CREATED_BY_ADMIN,
+                    AdminAuditService.ENTITY_TYPE_MENU_ITEM, created.id(), null, summary(created),
+                    "Created for restaurant " + created.restaurantId());
+            return created;
+        });
+    }
+
+    /** Changes the fields only: status (even BLOCKED) and availability stay as they are. */
+    public MenuItemResponse updateMenuItem(Long itemId, MenuItemRequest request, CallerInfo admin) {
+        if (request.version() == null) {
+            throw new InvalidRequestException("version is required when updating a menu item");
+        }
+        restaurantAccessGuard.requireEditableRestaurant(findItem(itemId).getRestaurantId());
+
+        return transactionTemplate.execute(transaction -> {
+            MenuItem item = findItem(itemId);
+            String before = summary(item);
+            MenuItemResponse updated = menuItemEditor.update(item, request);
+            adminAuditService.recordAction(admin, AuditAction.MENU_ITEM_UPDATED_BY_ADMIN,
+                    AdminAuditService.ENTITY_TYPE_MENU_ITEM, itemId, before, summary(updated),
+                    "Edited by platform admin");
+            return updated;
+        });
+    }
+
+    /** A hidden (DISABLED) copy in the same restaurant, named "name (copy)", "name (copy 2)", ... */
+    public MenuItemResponse duplicateMenuItem(Long itemId, CallerInfo admin) {
+        MenuItem source = findItem(itemId);
+        restaurantAccessGuard.requireEditableRestaurant(source.getRestaurantId());
+
+        return transactionTemplate.execute(transaction -> {
+            MenuItemRequest copyRequest = new MenuItemRequest(copyName(source), source.getDescription(),
+                    source.getPrice(), source.getCategoryId(), source.getFoodType(), source.getImageUrl(), null);
+            MenuItemResponse copy = menuItemEditor.create(source.getRestaurantId(), copyRequest,
+                    MenuItemStatus.DISABLED);
+            adminAuditService.recordAction(admin, AuditAction.MENU_ITEM_DUPLICATED_BY_ADMIN,
+                    AdminAuditService.ENTITY_TYPE_MENU_ITEM, copy.id(), "sourceItemId=" + itemId, summary(copy),
+                    "Duplicated from menu item " + itemId);
+            return copy;
+        });
+    }
+
+    /** First free name of the pattern; the original part is cut so the whole name fits the column. */
+    private String copyName(MenuItem source) {
+        for (int number = 1; ; number++) {
+            String suffix = number == 1 ? " (copy)" : " (copy " + number + ")";
+            String base = source.getName();
+            if (base.length() + suffix.length() > NAME_MAX_LENGTH) {
+                base = base.substring(0, NAME_MAX_LENGTH - suffix.length()).stripTrailing();
+            }
+            String candidate = base + suffix;
+            if (!menuItemRepository.existsByRestaurantIdAndName(source.getRestaurantId(), candidate)) {
+                return candidate;
+            }
+        }
+    }
+
+    private MenuItem findItem(Long itemId) {
+        return menuItemRepository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Menu item not found: " + itemId));
+    }
+
+    private static String summary(MenuItem item) {
+        return "restaurantId=" + item.getRestaurantId() + "; name=" + item.getName() + "; price=" + item.getPrice()
+                + "; categoryId=" + item.getCategoryId() + "; foodType=" + item.getFoodType();
+    }
+
+    private static String summary(MenuItemResponse item) {
+        return "restaurantId=" + item.restaurantId() + "; name=" + item.name() + "; price=" + item.price()
+                + "; categoryId=" + item.categoryId() + "; foodType=" + item.foodType();
+    }
+}

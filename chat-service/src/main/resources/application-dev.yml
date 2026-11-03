@@ -1,0 +1,9 @@
+# Local development
+logging:
+  level:
+    com.fooddelivery: DEBUG
+    # Uncomment to see the SQL Hibernate runs:
+    # org.hibernate.SQL: DEBUG
+
+# Development only: the services' shared secret of the internal APIs (set INTERNAL_SERVICE_TOKEN elsewhere)
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN:dev-internal-service-token}

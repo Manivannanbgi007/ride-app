@@ -1,0 +1,21 @@
+# Production: every secret and URL from the environment, no default token (the service refuses to start without it),
+# minimal actuator exposure.
+app:
+  service-token: ${AI_SERVICE_TOKEN}
+  gateway:
+    base-url: ${GATEWAY_URL}
+
+spring:
+  ai:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+
+logging:
+  level:
+    root: INFO

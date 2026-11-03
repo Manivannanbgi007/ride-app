@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "UserRegistered",
+  "namespace": "com.fooddelivery.events.user",
+  "doc": "A new account was created. Producer: user-service. Topic: fooddelivery.user.registered (key: userId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "userId", "type": "long" },
+    { "name": "fullName", "type": "string" },
+    { "name": "email", "type": "string" },
+    { "name": "phone", "type": ["null", "string"], "default": null },
+    { "name": "role", "type": "string", "doc": "CUSTOMER, RESTAURANT_ADMIN or DELIVERY_PARTNER" }
+  ]
+}

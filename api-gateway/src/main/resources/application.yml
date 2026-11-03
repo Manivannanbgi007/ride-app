@@ -1,0 +1,656 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  profiles:
+    default: dev
+  # Reactive code switches threads: this carries the trace context (and so the trace id in log lines) along
+  reactor:
+    context-propagation: auto
+  # Rate-limit counters only. Short timeouts: when Redis is down, requests pass without being counted.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 500ms
+      timeout: 500ms
+  # Access tokens are signed by user-service: its public key is read from user-service (once, then kept) and every
+  # token must be issued by and for this platform (see user-service app.jwt). The "role" claim becomes the caller's
+  # role (ROLE_PLATFORM_ADMIN...). Checked here and again by each service.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Addresses (regex) the gateway trusts to send X-Forwarded-* headers. The gateway only adds
+          # X-Forwarded-For (the client IP that services record in audit logs) for requests coming from
+          # these addresses, and strips the headers otherwise. The default covers loopback and private
+          # networks (local and Docker). In production, set this to your load balancer's addresses.
+          trusted-proxies: '${GATEWAY_TRUSTED_PROXIES:127\.0\.0\.1|0:0:0:0:0:0:0:1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+}'
+
+          # A service that does not take the connection within 2 s counts as unreachable (as in the services' own
+          # clients). Without it, a connection to the address of a stopped container can hang until the circuit
+          # breaker's 10 s limit. The whole answer is limited to 10 s by the circuit breakers (CircuitBreakerConfig).
+          httpclient:
+            connect-timeout: 2000
+
+          # CORS for the React application (added in the frontend phases). Applied by Spring Security (SecurityConfig),
+          # so the gateway's own 401 and 403 answers carry these headers too.
+          # allow-credentials: sign-in, refresh and sign-out send and receive the HttpOnly refresh cookie. With
+          # credentials the origins must be listed one by one: never "*".
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5180}
+                allowed-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+                allowed-headers: "*"
+                exposed-headers: X-Request-Id, Location
+                allow-credentials: true
+                max-age: 3600
+
+          # ------------------------------------------------------------------------------------------------------
+          # One route per microservice. Target URLs come from environment variables, with localhost defaults for
+          # running the services from the IDE / Maven.
+          #
+          # Every route protects its service the same way. The numbers are in the table "app.gateway.services"
+          # at the end of this file: change them there, not here.
+          #   metadata             timeouts: how long to wait for a connection, and for the answer (milliseconds)
+          #   RequestRateLimiter   throttling: requests per second per client (IP address); over it: 429
+          #   CircuitBreaker       a service that keeps failing is left alone for 10 s (CircuitBreakerConfig)
+          #   Retry                GET requests only, and only when the service could not be reached:
+          #                          ConnectException         connection refused, or not opened within connect-timeout
+          #                          PrematureCloseException  connection closed before the answer came
+          #                        series: "" means never because of the answer: a 5xx is passed on as it is
+          # The filters run in this order: a request is counted once, and its retries happen inside the circuit
+          # breaker (which sees one call).
+          # ------------------------------------------------------------------------------------------------------
+          routes:
+            # Session refresh and sign-out: the web app refreshes every area's access token now and then, so these get
+            # their own budget (app.rate-limit.session-requests-per-minute) instead of using up the login attempts.
+            # order: -1 makes this route win over user-auth below. No retry: both are POST requests.
+            - id: user-auth-session
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              order: -1
+              predicates:
+                - Path=/api/v1/auth/refresh,/api/v1/auth/logout
+              metadata:
+                connect-timeout: ${app.gateway.services.user-service.connect-timeout}
+                response-timeout: ${app.gateway.services.user-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@sessionRateLimiter}"
+                    key-resolver: "#{@sessionKeyResolver}"
+                - name: CircuitBreaker
+                  args:
+                    name: user-service
+                    fallbackUri: forward:/fallback/user-service
+
+            # Login and registration: a much smaller budget per minute (password guessing, sign-up spam), see
+            # app.rate-limit.auth-requests-per-minute. No retry: both are POST requests.
+            - id: user-auth
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/auth/**
+              metadata:
+                connect-timeout: ${app.gateway.services.user-service.connect-timeout}
+                response-timeout: ${app.gateway.services.user-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@authRateLimiter}"
+                    key-resolver: "#{@authKeyResolver}"
+                - name: CircuitBreaker
+                  args:
+                    name: user-service
+                    fallbackUri: forward:/fallback/user-service
+
+            - id: user-service
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/v1/users/**,/api/v1/admin/users/**
+              metadata:
+                connect-timeout: ${app.gateway.services.user-service.connect-timeout}
+                response-timeout: ${app.gateway.services.user-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.user-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.user-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: user-service
+                    fallbackUri: forward:/fallback/user-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.user-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # Menus belong to catalog-service even though their URLs sit under /api/v1/restaurants.
+            # order: -1 makes this route win over the general restaurant-service route below.
+            - id: catalog-restaurant-menus
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8083}
+              order: -1
+              predicates:
+                - Path=/api/v1/restaurants/{restaurantId}/menu,/api/v1/restaurants/mine/{restaurantId}/menu-items/**
+              metadata:
+                connect-timeout: ${app.gateway.services.catalog-service.connect-timeout}
+                response-timeout: ${app.gateway.services.catalog-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.catalog-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.catalog-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: catalog-service
+                    fallbackUri: forward:/fallback/catalog-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.catalog-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # A restaurant's incoming orders belong to order-service (same idea as the menus above).
+            - id: order-restaurant-orders
+              uri: ${ORDER_SERVICE_URL:http://localhost:8084}
+              order: -1
+              predicates:
+                - Path=/api/v1/restaurants/mine/{restaurantId}/orders/**
+              metadata:
+                connect-timeout: ${app.gateway.services.order-service.connect-timeout}
+                response-timeout: ${app.gateway.services.order-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.order-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.order-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: order-service
+                    fallbackUri: forward:/fallback/order-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.order-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # Which delivery partners delivered most of a restaurant's orders: delivery-service (an owner's view)
+            - id: delivery-restaurant-partners
+              uri: ${DELIVERY_SERVICE_URL:http://localhost:8087}
+              order: -1
+              predicates:
+                - Path=/api/v1/restaurants/mine/{restaurantId}/deliveries/**
+              metadata:
+                connect-timeout: ${app.gateway.services.delivery-service.connect-timeout}
+                response-timeout: ${app.gateway.services.delivery-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.delivery-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.delivery-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: delivery-service
+                    fallbackUri: forward:/fallback/delivery-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.delivery-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: restaurant-service
+              uri: ${RESTAURANT_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/restaurants/**,/api/v1/admin/restaurants/**
+              metadata:
+                connect-timeout: ${app.gateway.services.restaurant-service.connect-timeout}
+                response-timeout: ${app.gateway.services.restaurant-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.restaurant-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.restaurant-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: restaurant-service
+                    fallbackUri: forward:/fallback/restaurant-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.restaurant-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: catalog-service
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/v1/categories/**,/api/v1/menu-items/**,/api/v1/admin/categories/**,/api/v1/admin/menu-items/**
+              metadata:
+                connect-timeout: ${app.gateway.services.catalog-service.connect-timeout}
+                response-timeout: ${app.gateway.services.catalog-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.catalog-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.catalog-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: catalog-service
+                    fallbackUri: forward:/fallback/catalog-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.catalog-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: order-service
+              uri: ${ORDER_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/v1/cart/**,/api/v1/orders/**,/api/v1/admin/orders/**
+              metadata:
+                connect-timeout: ${app.gateway.services.order-service.connect-timeout}
+                response-timeout: ${app.gateway.services.order-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.order-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.order-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: order-service
+                    fallbackUri: forward:/fallback/order-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.order-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: payment-service
+              uri: ${PAYMENT_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/v1/payments/**,/api/v1/admin/payments/**,/api/v1/admin/refunds/**
+              metadata:
+                connect-timeout: ${app.gateway.services.payment-service.connect-timeout}
+                response-timeout: ${app.gateway.services.payment-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.payment-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.payment-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: payment-service
+                    fallbackUri: forward:/fallback/payment-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.payment-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: notification-service
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/api/v1/notifications/**,/api/v1/admin/notifications/**
+              metadata:
+                connect-timeout: ${app.gateway.services.notification-service.connect-timeout}
+                response-timeout: ${app.gateway.services.notification-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.notification-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.notification-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: notification-service
+                    fallbackUri: forward:/fallback/notification-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.notification-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # Live updates (WebSocket) of the browser: one long-lived connection per open page. No rate limiter,
+            # circuit breaker, retry or time limit here: they are made for short requests and would cut the connection.
+            - id: live-updates
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/ws/**
+              metadata:
+                connect-timeout: ${app.gateway.services.notification-service.connect-timeout}
+            # Delivery partners themselves (profile, admin search, suspend and reactivate, audit): delivery-partner-service.
+            # Same paths as when delivery-service owned partners, so it is checked first (order -1); what partners are
+            # doing stays with delivery-service: /me/availability, /availability, /stats and /{userId}/deliveries.
+            - id: delivery-partner-service
+              uri: ${DELIVERY_PARTNER_SERVICE_URL:http://localhost:8099}
+              order: -1
+              predicates:
+                - Path=/api/v1/delivery/partners/me,/api/v1/admin/delivery-partners,/api/v1/admin/delivery-partners/{userId:[0-9]+},/api/v1/admin/delivery-partners/{userId:[0-9]+}/activate,/api/v1/admin/delivery-partners/{userId:[0-9]+}/deactivate,/api/v1/admin/delivery-partners/{userId:[0-9]+}/audit-logs
+              metadata:
+                connect-timeout: ${app.gateway.services.delivery-partner-service.connect-timeout}
+                response-timeout: ${app.gateway.services.delivery-partner-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.delivery-partner-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.delivery-partner-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: delivery-partner-service
+                    fallbackUri: forward:/fallback/delivery-partner-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.delivery-partner-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: delivery-service
+              uri: ${DELIVERY_SERVICE_URL:http://localhost:8087}
+              predicates:
+                - Path=/api/v1/delivery/**,/api/v1/admin/delivery-partners/**,/api/v1/admin/deliveries/**
+              metadata:
+                connect-timeout: ${app.gateway.services.delivery-service.connect-timeout}
+                response-timeout: ${app.gateway.services.delivery-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.delivery-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.delivery-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: delivery-service
+                    fallbackUri: forward:/fallback/delivery-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.delivery-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: search-service
+              uri: ${SEARCH_SERVICE_URL:http://localhost:8088}
+              predicates:
+                - Path=/api/v1/search/**,/api/v1/admin/search/**
+              metadata:
+                connect-timeout: ${app.gateway.services.search-service.connect-timeout}
+                response-timeout: ${app.gateway.services.search-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.search-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.search-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: search-service
+                    fallbackUri: forward:/fallback/search-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.search-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            - id: promotion-service
+              uri: ${PROMOTION_SERVICE_URL:http://localhost:8089}
+              predicates:
+                - Path=/api/v1/coupons/**,/api/v1/admin/coupons/**
+              metadata:
+                connect-timeout: ${app.gateway.services.promotion-service.connect-timeout}
+                response-timeout: ${app.gateway.services.promotion-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.promotion-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.promotion-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: promotion-service
+                    fallbackUri: forward:/fallback/promotion-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.promotion-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # Customer reviews of delivered orders, the public ratings (/api/v1/ratings: averages and review lists that visitors
+            # may read), and the admin Reviews page
+            - id: review-service
+              uri: ${REVIEW_SERVICE_URL:http://localhost:8094}
+              predicates:
+                - Path=/api/v1/reviews/**,/api/v1/admin/reviews/**,/api/v1/ratings/**
+              metadata:
+                connect-timeout: ${app.gateway.services.review-service.connect-timeout}
+                response-timeout: ${app.gateway.services.review-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.review-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.review-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: review-service
+                    fallbackUri: forward:/fallback/review-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.review-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # AI assistant (chatbot backend). A question to a CPU-hosted model can take a minute or more, so this route has
+            # its own long response-timeout and NO circuit breaker, retry or time limit: those are made for short requests
+            # (the circuit breaker's 10 s limit would cut every answer) and a retry would ask the model twice.
+            # Abuse protection: a strict per-client rate limit here, and per-user limits inside ai-mcp-client.
+            - id: ai-assistant
+              uri: ${AI_MCP_CLIENT_URL:http://localhost:8097}
+              predicates:
+                - Path=/api/v1/assistant/**
+              metadata:
+                connect-timeout: ${app.gateway.assistant.connect-timeout}
+                response-timeout: ${app.gateway.assistant.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.assistant.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.assistant.burst}
+
+            # Support chat: a participant's own conversation, and the admins' shared inbox
+            - id: chat-service
+              uri: ${CHAT_SERVICE_URL:http://localhost:8096}
+              predicates:
+                - Path=/api/v1/chat/**,/api/v1/admin/chat/**
+              metadata:
+                connect-timeout: ${app.gateway.services.chat-service.connect-timeout}
+                response-timeout: ${app.gateway.services.chat-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.chat-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.chat-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: chat-service
+                    fallbackUri: forward:/fallback/chat-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.chat-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+            # Dashboard, reports, calendar and the platform-wide audit log (combined from the services that own the data)
+            - id: admin-service
+              uri: ${ADMIN_SERVICE_URL:http://localhost:8092}
+              predicates:
+                - Path=/api/v1/admin/dashboard/**,/api/v1/admin/reports/**,/api/v1/admin/audit-logs/**,/api/v1/admin/calendar/**
+              metadata:
+                connect-timeout: ${app.gateway.services.admin-service.connect-timeout}
+                response-timeout: ${app.gateway.services.admin-service.response-timeout}
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${app.gateway.services.admin-service.requests-per-second}
+                    redis-rate-limiter.burstCapacity: ${app.gateway.services.admin-service.burst}
+                - name: CircuitBreaker
+                  args:
+                    name: admin-service
+                    fallbackUri: forward:/fallback/admin-service
+                - name: Retry
+                  args:
+                    retries: ${app.gateway.services.admin-service.retries}
+                    methods: GET
+                    series: ""
+                    exceptions: java.net.ConnectException, reactor.netty.http.client.PrematureCloseException
+                    backoff: { firstBackoff: 100ms, maxBackoff: 500ms, factor: 2 }
+
+app:
+  gateway:
+    # ----------------------------------------------------------------------------------------------------------
+    # Traffic settings per microservice, used by the routes above. Every value can also be set from an environment
+    # variable: upper case, "." and "-" become "_", e.g. APP_GATEWAY_SERVICES_ORDER_SERVICE_RESPONSE_TIMEOUT=9000.
+    #
+    #   requests-per-second  throttling: each client (IP address) may send this service so many requests per second
+    #   burst                ...and this many at once, before the per-second rate applies (over it: 429)
+    #   connect-timeout      ms to open a connection to the service (it is down or unreachable after that)
+    #   response-timeout     ms to wait for the service's answer (after that: 504 Gateway Timeout)
+    #   retries              how often a GET request is sent again when the service could not be reached
+    #                        (connection refused, or closed before the answer), after 100 ms, then 200 ms. 1 to 3.
+    #                        Never after a timeout or an error answer, and never for POST/PUT/PATCH/DELETE: those
+    #                        could, for example, place an order twice.
+    #
+    # The gateway checks these values when it starts (GatewayTrafficProperties) and refuses to start with a clear
+    # message when one would misbehave, e.g. a response-timeout that is not below response-timeout-limit.
+    # ----------------------------------------------------------------------------------------------------------
+    # A service that asks another one gets more time: when the other service is slow, each of its calls can take
+    # about 4 s before it gives up (2 s connect, 3 s read, one retry), and it still has to answer.
+    # The assistant is not one of the ordinary services below: its answers are slow by nature (see the route)
+    assistant: { requests-per-second: 2, burst: 10, connect-timeout: 2000, response-timeout: 170000 }
+    services:
+      # Own data only
+      user-service:         { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 5000, retries: 2 }
+      # Asks user-service (restaurant owners)
+      restaurant-service:   { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 8000, retries: 2 }
+      # Asks restaurant-service; many reads while customers browse menus
+      catalog-service:      { requests-per-second: 40, burst: 80, connect-timeout: 2000, response-timeout: 8000, retries: 2 }
+      # Checkout asks user-, restaurant-, catalog- and promotion-service one after the other
+      order-service:        { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 9000, retries: 2 }
+      # Asks order-service and the (simulated) payment provider; few payments per customer
+      payment-service:      { requests-per-second: 10, burst: 20, connect-timeout: 2000, response-timeout: 8000, retries: 2 }
+      # Own data only (notifications are sent from Kafka events, not during a request)
+      notification-service: { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 5000, retries: 2 }
+      # May ask order- and restaurant-service one after the other; going online may ask delivery-partner-service
+      delivery-service:     { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 9000, retries: 2 }
+      # Asks user-service (a partner's first call)
+      delivery-partner-service: { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 8000, retries: 2 }
+      # Elasticsearch only; search-as-you-type sends a request for (almost) every key press
+      search-service:       { requests-per-second: 40, burst: 80, connect-timeout: 2000, response-timeout: 5000, retries: 2 }
+      # Own data only
+      promotion-service:    { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 5000, retries: 2 }
+      # Asks order-service (to check an order) and catalog-service (dish photos) when a review is written or listed
+      review-service:       { requests-per-second: 20, burst: 40, connect-timeout: 2000, response-timeout: 8000, retries: 2 }
+      # Own data; the open chat page also refreshes on live hints, so reads are frequent
+      chat-service:         { requests-per-second: 30, burst: 60, connect-timeout: 2000, response-timeout: 5000, retries: 2 }
+      # The dashboard and reports ask six services at once (each request costs them six), and wait up to 5 s for them
+      admin-service:        { requests-per-second: 10, burst: 20, connect-timeout: 2000, response-timeout: 9000, retries: 2 }
+
+    # The circuit breakers' overall time limit (CircuitBreakerConfig): a safety net above every response-timeout.
+    # Also bounds a GET with retries: the client never waits longer than this.
+    response-timeout-limit: ${GATEWAY_RESPONSE_TIMEOUT_LIMIT:10s}
+
+  # Login and registration (route user-auth): attempts per client (IP address) per minute. Over it: 429.
+  # Session refresh and sign-out (route user-auth-session): requests per client per minute, a separate budget.
+  rate-limit:
+    auth-requests-per-minute: ${GATEWAY_AUTH_RATE_LIMIT_PER_MINUTE:10}
+    session-requests-per-minute: ${GATEWAY_SESSION_RATE_LIMIT_PER_MINUTE:30}
+
+management:
+  # Observability (Phase 14b): metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, gateway, prometheus
+  endpoint:
+    gateway:
+      access: read-only
+  info:
+    env:
+      enabled: true
+  # Redis is optional here (cache / rate limits): the service keeps working without it, so it must not report
+  # DOWN when Redis is unreachable. Redis itself is monitored separately.
+  health:
+    redis:
+      enabled: false
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Single entry point for the Food Delivery platform
+
+logging:
+  pattern:
+    # Adds the trace and span ids to every log line: [traceId,spanId] (Loki links logs to traces with it)
+    correlation: "[%X{traceId:-},%X{spanId:-}] "
+  level:
+    # Spring's Redis limiter logs a stack trace for every failed call, under the name of our subclass;
+    # OutageAwareRedisRateLimiter logs the outage once instead (as RateLimitConfig). Quoted: a bare OFF is read
+    # as the boolean false.
+    com.fooddelivery.apigateway.config.OutageAwareRedisRateLimiter: "OFF"

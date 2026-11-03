@@ -1,0 +1,322 @@
+### Food Delivery Platform - Delivery Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Prerequisites: run user-service.http ... order-service.http first, so the customer has an address and the
+### owner below has an ACTIVE restaurant (in Bengaluru) with menu items, open now.
+###
+### How a delivery happens:
+###   the restaurant marks the order READY_FOR_PICKUP -> a delivery is created (PENDING)
+###   -> the assignment job (every 5s) offers it to the AVAILABLE partner in the restaurant's city who has waited
+###      longest (ASSIGNED) -> the partner accepts within 2 minutes (ACCEPTED), or it goes to the next partner
+###   -> pickup (PICKED_UP: the order becomes OUT_FOR_DELIVERY) -> delivered (DELIVERED: the order too).
+###
+### Caller identity: the access token of a sign-in below (Authorization: Bearer); its role must be
+###   DELIVERY_PARTNER for /delivery/partners and /delivery/deliveries, CUSTOMER for
+###   /delivery/orders (tracking), PLATFORM_ADMIN for /admin/**
+
+@gateway = http://localhost:8080
+
+@partnerEmail = ravi.rider@example.com
+@partnerPassword = Rider1234
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+# Change for every new order (one key per checkout)
+@checkoutKey = delivery-demo-0001
+
+@partnerId = {{partnerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@partnerToken = {{partnerLogin.response.body.$.accessToken}}
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@addressId = {{addresses.response.body.$[0].id}}
+@restaurantId = {{myRestaurants.response.body.$[0].id}}
+@firstItemId = {{menu.response.body.$.sections[0].items[0].id}}
+@orderId = {{placeOrder.response.body.$.id}}
+@deliveryId = {{current.response.body.$.id}}
+
+
+### ============================ SETUP ============================
+
+### 1. Register a delivery partner (409 if it already exists: fine). UserRegistered creates the partner in
+###    delivery-partner-service, whose DeliveryPartnerChanged event adds them to delivery-service's dispatch list.
+POST {{gateway}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{partnerEmail}}",
+  "password": "{{partnerPassword}}",
+  "fullName": "Ravi Kumar",
+  "phone": "+919900112233",
+  "role": "DELIVERY_PARTNER"
+}
+
+### 2. Logins -> partnerId, customerToken, ownerToken, adminToken
+# @name partnerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{partnerEmail}}", "password": "{{partnerPassword}}" }
+
+###
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+###
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{ownerEmail}}", "password": "{{ownerPassword}}" }
+
+###
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+
+### ===================== PARTNER: PROFILE AND AVAILABILITY =====================
+
+### 3. My partner profile (OFFLINE, readyToWork false until vehicle and city are set) - delivery-partner-service
+GET {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+
+### 4. Going online without a vehicle: 422
+PUT {{gateway}}/api/v1/delivery/partners/me/availability
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "status": "AVAILABLE" }
+
+### 5. Vehicle and city (deliveries are offered from restaurants in this city) - delivery-partner-service
+PUT {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "vehicleType": "MOTORCYCLE", "vehicleNumber": "KA01AB1234", "city": "Bengaluru" }
+
+### 6. Go online
+PUT {{gateway}}/api/v1/delivery/partners/me/availability
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "status": "AVAILABLE" }
+
+
+### ================= AN ORDER TO DELIVER (cash on delivery) =================
+
+### 7. The customer's address -> addressId
+# @name addresses
+GET {{gateway}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+
+### 8. The owner's restaurant and its menu -> restaurantId, firstItemId
+# @name myRestaurants
+GET {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+
+###
+# @name menu
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}/menu
+
+### 9. Cart and checkout -> orderId
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+###
+# @name placeOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{checkoutKey}}
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "CASH_ON_DELIVERY" }
+
+### 10. The restaurant accepts, prepares and marks it ready (run all three)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/accept
+Authorization: Bearer {{ownerToken}}
+
+###
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/preparing
+Authorization: Bearer {{ownerToken}}
+
+###
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/ready
+Authorization: Bearer {{ownerToken}}
+
+
+### ========================= PARTNER: THE DELIVERY =========================
+
+### 11. Within a few seconds the delivery is offered to me -> deliveryId (204 if not yet: try again)
+###     I also get a push notification: GET /api/v1/notifications as the partner
+# @name current
+GET {{gateway}}/api/v1/delivery/deliveries/mine/current
+Authorization: Bearer {{partnerToken}}
+
+### 12a. Accept (within 2 minutes, otherwise the offer goes to someone else and I go OFFLINE)
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/accept
+Authorization: Bearer {{partnerToken}}
+
+### 12b. ... or decline (instead of 12a): it is offered to the next partner, never to me again
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/decline
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "reason": "Flat tyre" }
+
+### 13. The customer sees who brings the food (and can call them while they are on the way)
+GET {{gateway}}/api/v1/delivery/orders/{{orderId}}
+Authorization: Bearer {{customerToken}}
+
+### 13a. My phone's position while on the way (the partner page sends it by itself): 204. Sent again within 2 s it
+###      is skipped; 409 before accepting or after delivering. Only the latest position is kept.
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/location
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "latitude": 12.9716, "longitude": 77.5946, "accuracyMeters": 12, "headingDeg": 90 }
+
+### 13b. The customer's live map: the partner's last position, the restaurant and the drop-off (404 until accepted)
+GET {{gateway}}/api/v1/delivery/orders/{{orderId}}/live
+Authorization: Bearer {{customerToken}}
+
+### 14. Picked up at the restaurant (the order becomes OUT_FOR_DELIVERY)
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/pickup
+Authorization: Bearer {{partnerToken}}
+
+### 15. Delivered without confirming the cash: 422 (cash on delivery)
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/deliver
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{}
+
+### 16. Delivered, cash collected: put the order total (cashToCollect from step 11)
+PUT {{gateway}}/api/v1/delivery/deliveries/mine/{{deliveryId}}/deliver
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "cashCollected": {{current.response.body.$.cashToCollect}} }
+
+### 17. The order is DELIVERED and PAID (order-service applied DeliveryStatusChanged)
+GET {{gateway}}/api/v1/orders/{{orderId}}
+Authorization: Bearer {{customerToken}}
+
+### 18. My history and my profile (AVAILABLE again, completedDeliveries + 1)
+GET {{gateway}}/api/v1/delivery/deliveries/mine?status=DELIVERED
+Authorization: Bearer {{partnerToken}}
+
+###
+GET {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+
+
+### ===================== ADMIN: DELIVERY PARTNERS =====================
+### Through the gateway: search, one partner, deactivate, activate and audit trail are delivery-partner-service;
+### availability, stats and a partner's deliveries are delivery-service (see delivery-partner-service.http).
+
+### 19. Partners in a city, by status
+GET {{gateway}}/api/v1/admin/delivery-partners?city=Bengaluru&status=AVAILABLE
+Authorization: Bearer {{adminToken}}
+
+### 20. How many are available, busy, offline, suspended right now
+GET {{gateway}}/api/v1/admin/delivery-partners/availability
+Authorization: Bearer {{adminToken}}
+
+### 21. One partner and their deliveries
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/deliveries
+Authorization: Bearer {{adminToken}}
+
+### 22. Deactivate (suspend) - 409 while the partner is on a delivery (reassign it first)
+PUT {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Documents expired" }
+
+### 23. Activate again (the partner starts OFFLINE and goes online themselves)
+PUT {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "New documents verified" }
+
+### 24. The partner's audit trail
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+
+### ======================== ADMIN: DELIVERIES ========================
+
+### 25. Search (filters: status, orderId, partnerUserId, customerId, restaurantId, city, fromDate, toDate)
+GET {{gateway}}/api/v1/admin/deliveries?city=Bengaluru&sort=createdAt,desc
+Authorization: Bearer {{adminToken}}
+
+### 26. Delayed deliveries: no partner 10 min after the food was ready, or not delivered after 45 min
+GET {{gateway}}/api/v1/admin/deliveries/delayed
+Authorization: Bearer {{adminToken}}
+
+### 27. Today's report: per status, average delivery time, delayed now
+GET {{gateway}}/api/v1/admin/deliveries/summary
+Authorization: Bearer {{adminToken}}
+
+### 28. One delivery with its full timeline (offers, declines, timeouts, reassignments)
+GET {{gateway}}/api/v1/admin/deliveries/{{deliveryId}}
+Authorization: Bearer {{adminToken}}
+
+### 29. Reassign a delivery that is not picked up yet (audited): to an AVAILABLE partner ...
+PUT {{gateway}}/api/v1/admin/deliveries/{{deliveryId}}/reassign
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "partnerUserId": {{partnerId}}, "reason": "Partner is next to the restaurant" }
+
+### 30. ... or back to the queue (the assignment job finds someone else)
+PUT {{gateway}}/api/v1/admin/deliveries/{{deliveryId}}/reassign
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Partner not answering the phone" }
+
+### 31. The delivery's audit trail
+GET {{gateway}}/api/v1/admin/deliveries/{{deliveryId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= EVENTS (Kafka, Phase 10) =======================
+### delivery-service writes DeliveryStatusChanged to its transactional outbox (key = orderId) on every step:
+###   order-service       PICKED_UP -> order OUT_FOR_DELIVERY, DELIVERED -> order DELIVERED (+ PAID for cash)
+###   notification-service ASSIGNED -> push to the partner, ACCEPTED -> push to the customer (partner, vehicle),
+###                        CANCELLED -> push to the partner who was on it
+### It also writes DeliveryPartnerStatusChanged (key = partnerUserId) whenever a partner's status changes.
+### It consumes: DeliveryPartnerChanged (partners), RestaurantChanged (pickup addresses), OrderCreated (customer and
+### drop-off), OrderStatusChanged READY_FOR_PICKUP (starts the delivery), OrderCancelled (cancels it).
+### Details whose events never arrived are fetched from order-service / restaurant-service by the assignment job.
+### Messages: Kafka UI http://localhost:8090
+
+GET http://localhost:8091/subjects/fooddelivery.delivery.status-changed-value/versions/latest
+
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8087/actuator/health
+
+### Swagger UI: http://localhost:8087/swagger-ui.html
+GET http://localhost:8087/v3/api-docs

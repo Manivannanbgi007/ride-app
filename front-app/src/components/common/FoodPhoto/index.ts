@@ -1,0 +1,1 @@
+export { FoodPhoto } from './FoodPhoto';

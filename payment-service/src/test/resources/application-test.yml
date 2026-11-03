@@ -1,0 +1,31 @@
+# Integration tests (Testcontainers provides the datasource and Kafka; order-service is mocked;
+# the refund recovery job is off so tests run it themselves).
+spring:
+  kafka:
+    properties:
+      # In-memory Schema Registry, shared by every serializer and deserializer in the test JVM.
+      schema.registry.url: mock://payment-service-tests
+
+app:
+  # The built-in test gateway, whatever a developer's .env chooses (PAYMENT_PROVIDER): no test reaches Razorpay
+  payment:
+    provider: SIMULATED
+  outbox:
+    poll-interval: 200ms
+  refund-recovery:
+    enabled: false
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo). Tracing export itself stays on: in Boot 4 it also turns on W3C
+# propagation (traceparent in HTTP and Kafka headers, and outbox rows), which the tests rely on.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
+# The internal APIs' shared secret in the tests
+app.security.internal-service-token: test-internal-service-token

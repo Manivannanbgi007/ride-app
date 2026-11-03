@@ -1,0 +1,38 @@
+{
+  "type": "record",
+  "name": "RestaurantChanged",
+  "namespace": "com.fooddelivery.events.restaurant",
+  "doc": "A restaurant was submitted, edited or changed status. Carries the current state, so consumers can keep their own copy. Producer: restaurant-service. Topic: fooddelivery.restaurant.changed (key: restaurantId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "changeType", "type": "string", "doc": "SUBMITTED, PROFILE_UPDATED, STATUS_CHANGED, or REPUBLISHED (an admin replayed the current state: nothing changed)" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "version", "type": "long", "doc": "Version of the restaurant after the change: consumers ignore events older than the copy they have" },
+    { "name": "ownerUserId", "type": "long" },
+    { "name": "name", "type": "string" },
+    { "name": "city", "type": "string" },
+    { "name": "status", "type": "string", "doc": "PENDING, APPROVED, ACTIVE, INACTIVE, SUSPENDED or REJECTED (string: new statuses must not break consumers)" },
+    { "name": "previousStatus", "type": ["null", "string"], "default": null },
+    { "name": "reason", "type": ["null", "string"], "default": null, "doc": "Why the status changed (admin decisions)" },
+    { "name": "address", "default": null, "doc": "Added in 1.3.0: the pickup address for delivery partners (null in older events)",
+      "type": ["null", {
+        "type": "record",
+        "name": "RestaurantAddress",
+        "fields": [
+          { "name": "line1", "type": "string" },
+          { "name": "line2", "type": ["null", "string"], "default": null },
+          { "name": "city", "type": "string" },
+          { "name": "state", "type": "string" },
+          { "name": "postalCode", "type": "string" },
+          { "name": "country", "type": "string" },
+          { "name": "latitude", "type": ["null", "double"], "default": null },
+          { "name": "longitude", "type": ["null", "double"], "default": null }
+        ]
+      }] },
+    { "name": "description", "type": ["null", "string"], "default": null, "doc": "Added in 1.4.0, for search" },
+    { "name": "cuisines", "type": ["null", { "type": "array", "items": "string" }], "default": null,
+      "doc": "Added in 1.4.0, for search (null in older events)" }
+  ]
+}

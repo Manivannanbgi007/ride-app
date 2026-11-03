@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Front-App: Food Delivery platform" />
+    <title>Front-App</title>
+    <script>
+      /* The theme before the first paint (src/theme/themeStorage.ts does the same: keep them in step) */
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem('front-app.theme');
+        } catch (error) {
+          /* storage blocked: follow the system */
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+    <style>
+      /*
+       * The loader seen while the application's code downloads (before React can draw anything). It looks like
+       * the page loader (components/common/Loader/PageLoader.tsx) and is replaced by the application's first
+       * screen. Plain CSS: the application's styles are not there yet. Colours from src/index.css.
+       */
+      body {
+        margin: 0;
+        background: #f3f6f4;
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+      }
+      :root[data-theme='dark'] body {
+        background: #0d1410;
+      }
+      :root[data-theme='dark'] .boot {
+        color: #e7f0ea;
+      }
+      .boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 16px;
+        color: #1c2c20;
+        font:
+          600 14px/1.5 ui-sans-serif,
+          system-ui,
+          sans-serif;
+        text-align: center;
+        /* Only after 0.2 s: a fast connection never sees it flash */
+        animation: boot-in 0.35s ease-out 0.2s both;
+      }
+      .boot-mark {
+        position: relative;
+        display: flex;
+        width: 80px;
+        height: 80px;
+        align-items: center;
+        justify-content: center;
+      }
+      .boot-ring {
+        position: absolute;
+        inset: 4px;
+        border: 4px solid #dbf5e6;
+        border-top-color: #39c576;
+        border-right-color: #61d192;
+        border-radius: 50%;
+        animation: boot-spin 1s linear infinite;
+      }
+      .boot-plate {
+        display: flex;
+        width: 44px;
+        height: 44px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: #39c576;
+        box-shadow: 0 6px 16px -6px rgb(57 197 118 / 0.55);
+        color: #052e18;
+      }
+      .boot p {
+        margin: 0;
+      }
+      /* After 12 s without the application: probably a very slow or broken connection */
+      .boot-slow {
+        max-width: 300px;
+        color: #5f7264;
+        font-weight: 500;
+        animation: boot-in 0.4s ease-out 12s both;
+      }
+      .boot-slow a {
+        color: #197142;
+        font-weight: 700;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes boot-in {
+        from {
+          visibility: hidden;
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          visibility: visible;
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-ring {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot" role="status">
+        <div class="boot-mark" aria-hidden="true">
+          <span class="boot-ring"></span>
+          <span class="boot-plate">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" />
+              <path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7" />
+              <path d="m2.1 21.8 6.4-6.3" />
+              <path d="m19 5-7 7" />
+            </svg>
+          </span>
+        </div>
+        <p>Loading Front-App…</p>
+        <p class="boot-slow">
+          This is taking longer than usual. Please check your connection, or
+          <a href="">reload the page</a>.
+        </p>
+      </div>
+    </div>
+    <noscript>Front-App needs JavaScript. Please turn it on in your browser.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

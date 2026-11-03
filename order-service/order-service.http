@@ -1,0 +1,305 @@
+### Food Delivery Platform - Order Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Prerequisites: run restaurant-service.http and catalog-service.http first, so the owner below
+### has an ACTIVE restaurant with menu items. The restaurant must be open now (opening hours).
+###
+### Caller identity: the access token of a sign-in below (Authorization: Bearer); its role must be
+###   CUSTOMER for /cart and /orders, RESTAURANT_ADMIN for /restaurants/mine/**,
+###   PLATFORM_ADMIN for /admin/**
+
+@gateway = http://localhost:8080
+# The services' shared secret of the internal APIs: the dev profile's value (INTERNAL_SERVICE_TOKEN elsewhere)
+@internalServiceToken = dev-internal-service-token
+
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+# One key per checkout attempt. Re-running step 9 with the same key returns the same order.
+# Change it (for example -0002) to place a new order.
+@checkoutKey = checkout-demo-0001
+
+@customerId = {{customerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@addressId = {{addAddress.response.body.$.id}}
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@restaurantId = {{myRestaurants.response.body.$[0].id}}
+@firstItemId = {{menu.response.body.$.sections[0].items[0].id}}
+@orderId = {{placeOrder.response.body.$.id}}
+@onlineOrderId = {{placeOnlineOrder.response.body.$.id}}
+
+
+### ============================ SETUP ============================
+
+### 1. Register a customer (409 if it already exists: fine)
+POST {{gateway}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{customerEmail}}",
+  "password": "{{customerPassword}}",
+  "fullName": "Meera Iyer",
+  "phone": "+919845012345"
+}
+
+### 2. Customer login -> customerId
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+### 3. Delivery address -> addressId
+# @name addAddress
+POST {{gateway}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "type": "HOME",
+  "line1": "7 Residency Road",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "postalCode": "560025",
+  "country": "India"
+}
+
+### 4. Owner login -> ownerToken
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{ownerEmail}}", "password": "{{ownerPassword}}" }
+
+### 5. The owner's restaurant -> restaurantId
+# @name myRestaurants
+GET {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+
+### 6. The customer reads the menu -> firstItemId
+# @name menu
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}/menu
+
+
+### ============================ CART ============================
+
+### 7. Put 2 of the first dish in the cart (live price, totals, delivery fee, tax)
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 2 }
+
+### 8. My cart
+GET {{gateway}}/api/v1/cart
+Authorization: Bearer {{customerToken}}
+
+### 8a. Optional: apply a coupon (create WELCOME100 in promotion-service.http first). The discount comes off the
+###     items before tax; 422 with the reason if the cart does not qualify ("Add items worth ... more").
+###     Checkout (step 9) then reserves one use of it; cancelling the order gives the use back.
+PUT {{gateway}}/api/v1/cart/coupon
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "code": "welcome100" }
+
+### 8b. Remove the coupon (skip this to check out with the discount)
+DELETE {{gateway}}/api/v1/cart/coupon
+Authorization: Bearer {{customerToken}}
+
+
+### =========================== CHECKOUT ===========================
+
+### 9. Place the order, cash on delivery (201, status PLACED) -> orderId
+# @name placeOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{checkoutKey}}
+Content-Type: application/json
+
+{
+  "addressId": {{addressId}},
+  "paymentMethod": "CASH_ON_DELIVERY",
+  "notes": "Less spicy, please ring the bell"
+}
+
+### 10. The same request again (a network retry): 200, same order, header Idempotent-Replayed: true
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{checkoutKey}}
+Content-Type: application/json
+
+{
+  "addressId": {{addressId}},
+  "paymentMethod": "CASH_ON_DELIVERY",
+  "notes": "Less spicy, please ring the bell"
+}
+
+### 11. Same key, different request: 422
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{checkoutKey}}
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "CARD" }
+
+### 12. Track the order (status + timeline)
+GET {{gateway}}/api/v1/orders/{{orderId}}
+Authorization: Bearer {{customerToken}}
+
+
+### ========================= RESTAURANT =========================
+
+### 13. New orders waiting for a decision, oldest first
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders?status=PLACED&sort=createdAt,asc
+Authorization: Bearer {{ownerToken}}
+
+### 14. Accept
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/accept
+Authorization: Bearer {{ownerToken}}
+
+### 15. The customer can no longer cancel (409)
+PUT {{gateway}}/api/v1/orders/{{orderId}}/cancel
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "reason": "Changed my mind" }
+
+### 16. Preparing
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/preparing
+Authorization: Bearer {{ownerToken}}
+
+### 17. Ready for pickup: delivery-service now finds a delivery partner (see delivery-service.http)
+PUT {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{orderId}}/ready
+Authorization: Bearer {{ownerToken}}
+
+### 18. Today's sales
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/sales-summary
+Authorization: Bearer {{ownerToken}}
+
+### 19. Sales for a period
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/sales-summary?fromDate=2026-10-01&toDate=2026-10-31
+Authorization: Bearer {{ownerToken}}
+
+### 19b. Sales of one day: perHour lists its 24 hours (orders, delivered, cancelled, sales per hour)
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/sales-summary?fromDate=2026-10-07&toDate=2026-10-07
+Authorization: Bearer {{ownerToken}}
+
+
+### ====================== ONLINE PAYMENT ORDER ======================
+
+### 20. Fill the cart again
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+### 21. Pay by UPI: waits for payment (PAYMENT_PENDING) until Payment Service exists (Phase 6)
+# @name placeOnlineOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{checkoutKey}}-upi
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "UPI" }
+
+### 22. The restaurant does not see unpaid orders (404)
+GET {{gateway}}/api/v1/restaurants/mine/{{restaurantId}}/orders/{{onlineOrderId}}
+Authorization: Bearer {{ownerToken}}
+
+### 23. The customer gives up on it
+PUT {{gateway}}/api/v1/orders/{{onlineOrderId}}/cancel
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "reason": "Payment app is not working" }
+
+### 24. My order history
+GET {{gateway}}/api/v1/orders?page=0&size=20
+Authorization: Bearer {{customerToken}}
+
+
+### ============================ ADMIN ============================
+
+### 25. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 26. Search: one restaurant, today
+GET {{gateway}}/api/v1/admin/orders?restaurantId={{restaurantId}}&fromDate=2026-10-07&toDate=2026-10-07
+Authorization: Bearer {{adminToken}}
+
+### 27. Search by order id
+GET {{gateway}}/api/v1/admin/orders?orderId={{orderId}}
+Authorization: Bearer {{adminToken}}
+
+### 28. Order details (payment status, cancellation reason, timeline)
+GET {{gateway}}/api/v1/admin/orders/{{orderId}}
+Authorization: Bearer {{adminToken}}
+
+### 29. Timeline only
+GET {{gateway}}/api/v1/admin/orders/{{orderId}}/timeline
+Authorization: Bearer {{adminToken}}
+
+### 30. Intervention: cancel the order (audited)
+PUT {{gateway}}/api/v1/admin/orders/{{orderId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Customer support: rider unavailable in this area tonight" }
+
+### 31. Audit history of the order
+GET {{gateway}}/api/v1/admin/orders/{{orderId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+### 32. The customer's order summary (for the admin user screen)
+GET {{gateway}}/api/v1/admin/orders/customers/{{customerId}}/summary
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= EVENTS AND SAGA (Kafka, Phases 7-10) =======================
+### order-service writes its events to the transactional outbox (key = orderId):
+###   OrderCreated          every checkout (payment-service keeps a copy of the order to charge)
+###   OrderStatusChanged    every status the order enters (notification-service tells the customer)
+###   OrderCancelled        cancelled by customer, admin or SYSTEM, or rejected by the restaurant
+###                         (a PAID order is then refunded automatically by payment-service)
+###   OrderPaymentRejected  a payment completed after the order was cancelled: payment-service refunds it
+### It consumes PaymentStatusChanged from payment-service: SUCCESS moves a PAYMENT_PENDING order to PLACED.
+### It consumes DeliveryStatusChanged from delivery-service (Phase 10): PICKED_UP moves a READY_FOR_PICKUP order
+### to OUT_FOR_DELIVERY, DELIVERED to DELIVERED (a cash-on-delivery order is then PAID); ASSIGNED is a timeline note.
+### Online-payment orders still unpaid after 15 minutes are cancelled by the system (ORDER_PAYMENT_TIMEOUT).
+### Payment results no longer arrive over HTTP (PUT /internal/orders/{id}/payment was removed in Phase 8).
+### Messages: Kafka UI http://localhost:8090
+
+### Event schemas in Schema Registry
+GET http://localhost:8091/subjects/fooddelivery.order.created-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.order.cancelled-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.payment.status-changed-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.delivery.status-changed-value/versions/latest
+
+### Internal API, used by payment-service and delivery-service for orders whose OrderCreated event has not arrived yet
+GET http://localhost:8084/api/v1/internal/orders/{{orderId}}
+X-Service-Token: {{internalServiceToken}}
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8084/actuator/health
+
+### Swagger UI: http://localhost:8084/swagger-ui.html
+GET http://localhost:8084/v3/api-docs

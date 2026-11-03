@@ -1,0 +1,31 @@
+package com.fooddelivery.aimcpclient;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+
+/** A clock a test can move forward (cache lifetimes, circuit breaker). */
+public final class MutableClock extends Clock {
+
+    private Instant now = Instant.parse("2026-10-10T10:00:00Z");
+
+    public void advance(Duration duration) {
+        now = now.plus(duration);
+    }
+
+    @Override
+    public ZoneId getZone() {
+        return ZoneId.of("UTC");
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+        return this;
+    }
+
+    @Override
+    public Instant instant() {
+        return now;
+    }
+}

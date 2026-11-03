@@ -1,0 +1,120 @@
+### Food Delivery Platform - AI MCP Server (agent loop, tools, MCP endpoint)
+### Written for the VS Code "REST Client" extension.
+###
+### These are SERVER-TO-SERVER calls: the browser uses /api/v1/assistant/** (ai-mcp-client). Every /internal and /mcp call needs
+### X-Service-Token (env AI_SERVICE_TOKEN; the dev profile default is below) and, to act for someone, their access token
+### (Authorization: Bearer, normally forwarded by ai-mcp-client; here from a sign-in through the gateway, valid 15 min).
+### Needs: Ollama with the model (OLLAMA_MODEL), Redis (proposals) and the API Gateway with the services behind it.
+
+@service = http://localhost:8098
+@gateway = http://localhost:8080
+@token = dev-ai-service-token
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+@ownerEmail = test.owner@fooddelivery.local
+@ownerPassword = Test@12345
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+
+### Sign-ins -> access tokens (run again after 15 minutes)
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}", "role": "CUSTOMER" }
+
+###
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}", "role": "PLATFORM_ADMIN" }
+
+###
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{ownerEmail}}", "password": "{{ownerPassword}}", "role": "RESTAURANT_ADMIN" }
+
+
+### Is the model available? (no identity needed beyond the token)
+GET {{service}}/internal/agent/status
+X-Service-Token: {{token}}
+
+### Admin: a question answered with the admin tools (first answer can take a minute on a CPU)
+POST {{service}}/internal/agent/chat
+Content-Type: application/json
+X-Service-Token: {{token}}
+Authorization: Bearer {{adminToken}}
+X-Request-Id: http-sample-1
+
+{
+  "message": "How many orders were delivered today, and how many were cancelled?",
+  "history": []
+}
+
+### Owner: sales of my restaurants
+POST {{service}}/internal/agent/chat
+Content-Type: application/json
+X-Service-Token: {{token}}
+Authorization: Bearer {{ownerToken}}
+
+{
+  "message": "Which dishes sold the most this week?",
+  "history": [
+    {"role": "USER", "text": "Hi"},
+    {"role": "ASSISTANT", "text": "Hello! How can I help with your restaurant?"}
+  ]
+}
+
+### Customer: search, then prepare an order. The answer carries "pendingAction" with an actionId.
+# @name prepare
+POST {{service}}/internal/agent/chat
+Content-Type: application/json
+X-Service-Token: {{token}}
+Authorization: Bearer {{customerToken}}
+
+{
+  "message": "Order 2 chicken biryani from restaurant 1 to my default address, cash on delivery",
+  "history": []
+}
+
+### Confirm the proposal (what the Confirm button does; repeating it returns the same order: ALREADY_CREATED)
+@actionId = {{prepare.response.body.$.pendingAction.actionId}}
+POST {{service}}/internal/agent/actions/{{actionId}}/confirm
+X-Service-Token: {{token}}
+Authorization: Bearer {{customerToken}}
+
+### Cancel a proposal instead (204)
+POST {{service}}/internal/agent/actions/{{actionId}}/cancel
+X-Service-Token: {{token}}
+Authorization: Bearer {{customerToken}}
+
+### No service token: 401
+POST {{service}}/internal/agent/chat
+Content-Type: application/json
+Authorization: Bearer {{customerToken}}
+
+{ "message": "hello", "history": [] }
+
+### MCP (Streamable HTTP): initialize. An MCP host sends the same headers (service token + access token) on every request.
+POST {{service}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+X-Service-Token: {{token}}
+Authorization: Bearer {{adminToken}}
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-03-26",
+    "capabilities": {},
+    "clientInfo": { "name": "rest-client", "version": "1.0" }
+  }
+}

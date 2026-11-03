@@ -1,0 +1,119 @@
+package com.fooddelivery.searchservice.service;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import co.elastic.clients.elasticsearch._types.DistanceUnit;
+import co.elastic.clients.elasticsearch._types.GeoLocation;
+import co.elastic.clients.elasticsearch._types.SortOptions;
+import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import com.fooddelivery.searchservice.document.RestaurantDocument;
+import com.fooddelivery.searchservice.dto.request.RestaurantSearchCriteria;
+import com.fooddelivery.searchservice.dto.response.RestaurantHit;
+import com.fooddelivery.searchservice.dto.response.SearchResults;
+import com.fooddelivery.searchservice.exception.InvalidRequestException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.elasticsearch.client.elc.NativeQuery;
+import org.springframework.data.elasticsearch.client.elc.NativeQueryBuilder;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHit;
+import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+/** Customers looking for restaurants: by words, city, cuisine and distance. Only ACTIVE restaurants are found. */
+@Service
+@RequiredArgsConstructor
+public class RestaurantSearchService {
+
+    private static final List<String> TEXT_FIELDS = List.of("name^3", "cuisines.text^2", "description");
+    private static final String CUISINES = "cuisines";
+
+    private final ElasticsearchOperations operations;
+
+    public SearchResults<RestaurantHit> search(RestaurantSearchCriteria criteria, int page, int size) {
+        SearchQueries.checkPage(page, size);
+        boolean byDistance = criteria.lat() != null || criteria.lon() != null;
+        if (byDistance && (criteria.lat() == null || criteria.lon() == null)) {
+            throw new InvalidRequestException("Send lat and lon together");
+        }
+        if (criteria.radiusKm() != null && !byDistance) {
+            throw new InvalidRequestException("radiusKm needs lat and lon");
+        }
+
+        List<Query> filters = new ArrayList<>();
+        filters.add(SearchQueries.exact("status", RestaurantDocument.VISIBLE_STATUS));
+        if (StringUtils.hasText(criteria.city())) {
+            filters.add(SearchQueries.exactIgnoringCase("city", criteria.city().trim()));
+        }
+        if (StringUtils.hasText(criteria.cuisine())) {
+            filters.add(SearchQueries.exactIgnoringCase(CUISINES, criteria.cuisine().trim()));
+        }
+        GeoLocation here = byDistance
+                ? GeoLocation.of(l -> l.latlon(ll -> ll.lat(criteria.lat()).lon(criteria.lon())))
+                : null;
+        if (criteria.radiusKm() != null) {
+            filters.add(Query.of(q -> q.geoDistance(g -> g.field("location").location(here)
+                    .distance(criteria.radiusKm() + "km"))));
+        }
+        if (criteria.minRating() != null) {
+            filters.add(SearchQueries.minRating(criteria.minRating()));
+        }
+        boolean hasText = StringUtils.hasText(criteria.q());
+
+        NativeQueryBuilder query = NativeQuery.builder()
+                .withQuery(q -> q.bool(b -> {
+                    b.filter(filters);
+                    if (hasText) {
+                        b.must(SearchQueries.text(criteria.q().trim(), TEXT_FIELDS));
+                    }
+                    return b;
+                }))
+                .withAggregation(CUISINES, SearchQueries.facet(CUISINES))
+                .withPageable(PageRequest.of(page, size));
+        boolean byRating = criteria.sort() == RestaurantSort.RATING;
+        if (byRating) {
+            // Best rated first, unrated last; ties as the search would have ordered them (nearest, best match, name)
+            query.withSort(SearchQueries.ratingSort(tieBreak(byDistance, hasText, here)));
+        } else if (byDistance) {
+            // Nearest first; the sort value is the distance, returned as distanceKm
+            query.withSort(nearest(here));
+        } else if (!hasText) {
+            query.withSort(SortOptions.of(s -> s.field(f -> f.field("name.sort").order(SortOrder.Asc))));
+        }
+
+        SearchHits<RestaurantDocument> hits = operations.search(query.build(), RestaurantDocument.class);
+        List<RestaurantHit> results = hits.getSearchHits().stream()
+                .map(hit -> toHit(hit, byDistance, byRating ? RATING_SORT_VALUES : 0)).toList();
+        return new SearchResults<>(criteria.q(), hits.getTotalHits(), page, size,
+                SearchQueries.totalPages(hits.getTotalHits(), size), results, SearchQueries.facets(hits, CUISINES));
+    }
+
+    /** How the search would order restaurants that are equally rated. */
+    private static SortOptions[] tieBreak(boolean byDistance, boolean hasText, GeoLocation here) {
+        if (byDistance) {
+            return new SortOptions[]{nearest(here)};
+        }
+        return hasText
+                ? new SortOptions[]{SortOptions.of(s -> s.score(sc -> sc.order(SortOrder.Desc)))}
+                : new SortOptions[]{SortOptions.of(s -> s.field(f -> f.field("name.sort").order(SortOrder.Asc)))};
+    }
+
+    private static SortOptions nearest(GeoLocation here) {
+        return SortOptions.of(s -> s.geoDistance(g -> g.field("location").location(here)
+                .order(SortOrder.Asc).unit(DistanceUnit.Kilometers)));
+    }
+
+    private static RestaurantHit toHit(SearchHit<RestaurantDocument> hit, boolean byDistance) {
+        RestaurantDocument restaurant = hit.getContent();
+        Double distanceKm = null;
+        if (byDistance && restaurant.getLocation() != null && !hit.getSortValues().isEmpty()
+                && hit.getSortValues().getFirst() instanceof Number distance) {
+            distanceKm = Math.round(distance.doubleValue() * 100) / 100.0;
+        }
+        return new RestaurantHit(restaurant.getId(), restaurant.getName(), restaurant.getDescription(),
+                restaurant.getCuisines(), restaurant.getCity(), restaurant.getAddressLine(), distanceKm);
+    }
+}

@@ -1,0 +1,57 @@
+# Grafana data sources, linked to each other: a metric's exemplar opens its trace (Prometheus -> Tempo), a trace
+# shows its log lines (Tempo -> Loki), and a log line opens its trace (Loki -> Tempo). "$$" is a literal "$".
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        customQuery: true
+        query: '{service=~".+"} | trace_id = "$${__trace.traceId}"'
+      nodeGraph:
+        enabled: true
+
+  # The same traces as Tempo, as Jaeger stores them (the Jaeger UI itself: http://localhost:16686)
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        customQuery: true
+        query: '{service=~".+"} | trace_id = "$${__trace.traceId}"'
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        # [traceId,spanId] at the start of every Spring Boot log line
+        - name: TraceID
+          matcherRegex: '\[([0-9a-f]{32}),[0-9a-f]{16}\]'
+          datasourceUid: tempo
+          url: "$${__value.raw}"

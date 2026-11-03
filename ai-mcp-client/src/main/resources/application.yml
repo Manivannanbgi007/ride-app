@@ -1,0 +1,102 @@
+server:
+  port: ${SERVER_PORT:8097}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: ai-mcp-client
+  profiles:
+    default: dev
+
+  # Local runs: read settings from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  # Conversations and rate-limit counters. Short timeouts: when Redis is slow or down the chat still answers
+  # (without history, without limits) instead of waiting.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 500ms
+      timeout: 500ms
+
+  # Who is calling: the access token signed by user-service. Its public key is fetched from user-service (and cached);
+  # the issuer and audience must be the platform's (see user-service app.jwt)
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+
+app:
+  # ai-mcp-server: the LLM agent. The token has no default here: the dev profile supplies one, production must set it.
+  agent-server:
+    base-url: ${AGENT_SERVER_URL:http://localhost:8098}
+    service-token: ${AI_SERVICE_TOKEN}
+    connect-timeout: 2s
+    # A CPU model is slow: a long read timeout (the browser is told to wait; see the chat window)
+    read-timeout: ${AGENT_READ_TIMEOUT:150s}
+    max-response-bytes: 262144
+    breaker-failures: 5
+    breaker-open-for: 20s
+  identity:
+    # A token with less time left is refused (the browser renews it): ai-mcp-server uses it for up to 150 s
+    min-token-validity: 180s
+  conversation:
+    ttl: ${CONVERSATION_TTL:2h}
+    max-messages: 40
+    max-conversations: 5
+    history-to-server: 12
+  rate-limit:
+    chat-messages: ${CHAT_RATE_LIMIT:20}
+    window: ${CHAT_RATE_WINDOW:10m}
+    max-in-flight: ${CHAT_MAX_IN_FLIGHT:3}
+
+management:
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+  # The chat degrades without Redis (no history, no limits) and must not report DOWN for it
+  health:
+    redis:
+      enabled: false
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: AI MCP client (chatbot backend-for-frontend)
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user= (empty ones are left out).
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} ){'[a-zA-Z]+= ', ''}"

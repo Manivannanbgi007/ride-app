@@ -1,0 +1,49 @@
+package com.fooddelivery.searchservice.dto.request;
+
+import java.math.BigDecimal;
+
+import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Size;
+
+/** Dish search; every filter is optional. Only dishes that can be ordered now are found. */
+public record FoodSearchCriteria(
+
+        @Parameter(description = "Words to look for in dish name, category, description and restaurant name "
+                + "(typos are tolerated)", example = "chicken biryani")
+        @Size(max = 100)
+        String q,
+
+        @Parameter(description = "Only dishes of restaurants in this city (any letter case)", example = "Bengaluru")
+        @Size(max = 100)
+        String city,
+
+        @Parameter(description = "Only dishes of this restaurant")
+        Long restaurantId,
+
+        @Parameter(description = "Only dishes of this category")
+        Long categoryId,
+
+        @Parameter(description = "VEG, NON_VEG or EGG")
+        FoodType foodType,
+
+        @Parameter(example = "100")
+        @DecimalMin("0.00")
+        BigDecimal minPrice,
+
+        @Parameter(example = "400")
+        @DecimalMin("0.00")
+        BigDecimal maxPrice,
+
+        @Parameter(description = "RELEVANCE (default), PRICE_LOW_TO_HIGH or PRICE_HIGH_TO_LOW")
+        FoodSort sort
+) {
+
+    public enum FoodType {
+        VEG, NON_VEG, EGG
+    }
+
+    public enum FoodSort {
+        RELEVANCE, PRICE_LOW_TO_HIGH, PRICE_HIGH_TO_LOW
+    }
+}

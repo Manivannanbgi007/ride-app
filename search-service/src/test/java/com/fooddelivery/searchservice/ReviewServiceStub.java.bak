@@ -1,0 +1,129 @@
+package com.fooddelivery.searchservice;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
+/**
+ * A stand-in for review-service's internal rating feed (the real one is built by someone else), on the port that
+ * application-test.yml points app.review.base-url at. It answers like the contract says: keyset pages
+ * {"items":[{"id","average","count"}],"nextAfterId"}, ids ascending, nextAfterId null on the last page. A test sets the
+ * ratings, can make a feed fail with a status code, or stop the server altogether (connection refused).
+ */
+final class ReviewServiceStub {
+
+    static final int PORT = 18094;
+    static final String RESTAURANTS = "restaurants";
+    static final String MENU_ITEMS = "menu-items";
+
+    record Rated(long id, double average, int count) {
+    }
+
+    private final Map<String, List<Rated>> feeds = new ConcurrentHashMap<>();
+    private final Map<String, Integer> failures = new ConcurrentHashMap<>();
+    private final List<String> requests = new CopyOnWriteArrayList<>();
+    private volatile int pageSize = 2;
+    private HttpServer server;
+
+    /** Starts the stub; the feeds are empty and every request is answered. */
+    synchronized void start() throws IOException {
+        reset();
+        server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        server.createContext("/api/v1/internal/ratings/", this::answer);
+        server.start();
+    }
+
+    /** From now on connections are refused, like a review-service that is down. */
+    synchronized void stop() {
+        if (server != null) {
+            server.stop(0);
+            server = null;
+        }
+    }
+
+    void reset() {
+        feeds.clear();
+        failures.clear();
+        requests.clear();
+        pageSize = 2;
+    }
+
+    void rate(String feed, Rated... rated) {
+        List<Rated> list = new ArrayList<>(List.of(rated));
+        list.sort((a, b) -> Long.compare(a.id(), b.id()));
+        feeds.put(feed, list);
+    }
+
+    /** Answers this feed with the given status and no body (204 means: no body at all). */
+    void fail(String feed, int status) {
+        failures.put(feed, status);
+    }
+
+    void failAll(int status) {
+        fail(RESTAURANTS, status);
+        fail(MENU_ITEMS, status);
+    }
+
+    void recover() {
+        failures.clear();
+    }
+
+    void pageSize(int size) {
+        pageSize = size;
+    }
+
+    /** The requests received, as "feed?query" in order. */
+    List<String> requests() {
+        return List.copyOf(requests);
+    }
+
+    private void answer(HttpExchange exchange) throws IOException {
+        URI uri = exchange.getRequestURI();
+        String path = uri.getPath();
+        String feed = path.substring(path.lastIndexOf('/') + 1);
+        requests.add(feed + "?" + uri.getQuery());
+        Integer failure = failures.get(feed);
+        if (failure != null) {
+            exchange.sendResponseHeaders(failure, -1);
+            exchange.close();
+            return;
+        }
+        long afterId = Long.parseLong(parameter(uri.getQuery(), "afterId"));
+        int size = Math.min(pageSize, Integer.parseInt(parameter(uri.getQuery(), "size")));
+        List<Rated> remaining = feeds.getOrDefault(feed, List.of()).stream().filter(r -> r.id() > afterId).toList();
+        List<Rated> page = remaining.subList(0, Math.min(size, remaining.size()));
+        String next = remaining.size() > page.size() ? String.valueOf(page.getLast().id()) : "null";
+        StringBuilder json = new StringBuilder("{\"items\":[");
+        for (int i = 0; i < page.size(); i++) {
+            Rated r = page.get(i);
+            json.append(i == 0 ? "" : ",").append("{\"id\":").append(r.id()).append(",\"average\":").append(r.average())
+                    .append(",\"count\":").append(r.count()).append('}');
+        }
+        json.append("],\"nextAfterId\":").append(next).append('}');
+        byte[] body = json.toString().getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, body.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(body);
+        }
+    }
+
+    private static String parameter(String query, String name) {
+        for (String pair : query.split("&")) {
+            if (pair.startsWith(name + "=")) {
+                return pair.substring(name.length() + 1);
+            }
+        }
+        throw new IllegalArgumentException("No " + name + " in " + query);
+    }
+}

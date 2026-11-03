@@ -1,0 +1,156 @@
+### Food Delivery Platform - Notification Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Prerequisite: run user-service.http ... payment-service.http first: their events (sign-ups, restaurant
+### reviews, orders, payments, refunds) are what this service turns into notifications.
+###
+### Emails: open Mailpit at http://localhost:8025 to read every email the platform sent.
+### SMS and push are simulated: see the notification-service log ("SMS sent (simulated)", "Push sent").
+
+@gateway = http://localhost:8080
+
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+@customerId = {{customerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@notificationId = {{inbox.response.body.$.content[0].id}}
+@failedId = {{failed.response.body.$.content[0].id}}
+
+
+### ============================ SETUP ============================
+
+### 1. Logins -> customerId, ownerToken, adminToken
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+###
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{ownerEmail}}", "password": "{{ownerPassword}}" }
+
+###
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+
+### ======================= MY INBOX (any role) =======================
+
+### 2. The customer's in-app notifications, newest first (order placed, accepted, refund ...)
+# @name inbox
+GET {{gateway}}/api/v1/notifications
+Authorization: Bearer {{customerToken}}
+
+### 3. Only the unread ones
+GET {{gateway}}/api/v1/notifications?unreadOnly=true
+Authorization: Bearer {{customerToken}}
+
+### 4. The badge on the bell
+GET {{gateway}}/api/v1/notifications/unread-count
+Authorization: Bearer {{customerToken}}
+
+### 5. Read the newest one (reading it again keeps the first read time)
+PUT {{gateway}}/api/v1/notifications/{{notificationId}}/read
+Authorization: Bearer {{customerToken}}
+
+### 6. Somebody else's notification: 404
+PUT {{gateway}}/api/v1/notifications/{{notificationId}}/read
+Authorization: Bearer {{ownerToken}}
+
+### 7. Mark everything as read
+PUT {{gateway}}/api/v1/notifications/read-all
+Authorization: Bearer {{customerToken}}
+
+### 8. The restaurant owner's inbox: "New order #..." and cancelled orders
+GET {{gateway}}/api/v1/notifications
+Authorization: Bearer {{ownerToken}}
+
+
+### ======================= ADMIN: MONITORING =======================
+
+### 9. Everything about one customer (all channels), newest first
+GET {{gateway}}/api/v1/admin/notifications?recipientUserId={{customerId}}
+Authorization: Bearer {{adminToken}}
+
+### 10. Emails only
+GET {{gateway}}/api/v1/admin/notifications?channel=EMAIL&sort=createdAt,desc
+Authorization: Bearer {{adminToken}}
+
+### 11. Skipped ones (e.g. text messages for users without a phone number)
+GET {{gateway}}/api/v1/admin/notifications?status=SKIPPED
+Authorization: Bearer {{adminToken}}
+
+### 12. Failed ones (gave up after 5 attempts) -> failedId
+# @name failed
+GET {{gateway}}/api/v1/admin/notifications?status=FAILED
+Authorization: Bearer {{adminToken}}
+
+### 13. Today's totals per status and channel
+GET {{gateway}}/api/v1/admin/notifications/summary
+Authorization: Bearer {{adminToken}}
+
+### 14. One notification with its delivery details: attempts, last error, address used
+GET {{gateway}}/api/v1/admin/notifications/{{notificationId}}
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= ADMIN: RESEND =======================
+### To produce a FAILED notification: docker compose stop user-service, place or cancel an order,
+### wait about 20 minutes (5 attempts: 10s, 1m, 5m, 15m), then docker compose start user-service.
+
+### 15. Send a FAILED (or SKIPPED) notification again (audited)
+POST {{gateway}}/api/v1/admin/notifications/{{failedId}}/resend
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "user-service was down during the delivery attempts" }
+
+### 16. A SENT notification cannot be resent: 409
+POST {{gateway}}/api/v1/admin/notifications/{{notificationId}}/resend
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Try" }
+
+### 17. Audit history of the resent notification
+GET {{gateway}}/api/v1/admin/notifications/{{failedId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+### 18. Customers cannot see these screens: 403
+GET {{gateway}}/api/v1/admin/notifications
+Authorization: Bearer {{customerToken}}
+
+
+### ======================= EVENTS (Kafka, Phase 9) =======================
+### Consumed: UserRegistered, RestaurantChanged, OrderStatusChanged, OrderCancelled, PaymentStatusChanged
+### (consumer group notification-service; each event is applied once, see processed_events).
+### Consumer lag and dead-letter topics: Kafka UI http://localhost:8090
+
+### OrderStatusChanged schema (new in Phase 9, published by order-service)
+GET http://localhost:8091/subjects/fooddelivery.order.status-changed-value/versions/latest
+
+### Mailpit API: the latest emails
+GET http://localhost:8025/api/v1/messages?limit=10
+
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8086/actuator/health
+
+### Swagger UI: http://localhost:8086/swagger-ui.html
+GET http://localhost:8086/v3/api-docs

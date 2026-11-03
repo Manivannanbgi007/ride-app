@@ -1,0 +1,199 @@
+server:
+  port: ${SERVER_PORT:8099}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies, so getRemoteAddr() is the real client IP.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: delivery-partner-service
+  # Who is calling: the access token signed by user-service. Its public key is read from user-service (once, then
+  # kept); the issuer and audience must be the platform's (user-service app.jwt). The "role" claim becomes the role.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  profiles:
+    default: dev
+
+  # Local runs: read passwords from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:${MYSQL_PORT:3330}/delivery_partner_db}
+    username: ${DB_USERNAME:delivery_partner_svc}
+    password: ${DB_PASSWORD:${DELIVERY_PARTNER_DB_PASSWORD:}}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    locations: classpath:db/migration
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+  # Events (Avro) on Kafka; the schemas live in Schema Registry.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Tracing: the trace context travels in the message headers, from the producer to every consumer
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+    consumer:
+      group-id: ${spring.application.name}
+      # A new consumer group starts from the oldest event, so partners who registered (and work statuses reported)
+      # before its first start are not missed. After that the group resumes where it stopped.
+      auto-offset-reset: earliest
+      # A message that cannot be read must not block its partition: the error handler sends it to the dead-letter topic.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.KafkaAvroDeserializer
+        # Generated classes (e.g. UserRegistered) instead of generic records
+        specific.avro.reader: true
+    # Used by the outbox relay, and to forward failed messages to the dead-letter topics.
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      # Written to all in-sync replicas, and no duplicates when the producer retries.
+      acks: all
+      properties:
+        enable.idempotence: true
+        # Only the outbox relay and the error handler send (never a request thread): give up quickly, retry later.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+
+app:
+  kafka:
+    topics:
+      partitions: 3
+      replicas: ${KAFKA_TOPIC_REPLICAS:1}
+  # Transactional outbox (see OutboxProperties)
+  outbox:
+    relay-enabled: true
+    poll-interval: 500ms
+    batch-size: 100
+    send-timeout: 15s
+    max-backoff: 10s
+    retention: 7d
+  user-service:
+    base-url: ${USER_SERVICE_URL:http://localhost:8081}
+    connect-timeout: 2s
+    read-timeout: 3s
+  # Only for the one-off import of the partners delivery-service kept before this service existed
+  delivery-service:
+    base-url: ${DELIVERY_SERVICE_URL:http://localhost:8087}
+    connect-timeout: 2s
+    read-timeout: 10s
+  # Idempotent consumers: ids of applied events are kept this long (Kafka keeps events 7 days)
+  processed-events:
+    retention: 30d
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+# Calls to other services (see RemoteCalls): one circuit breaker, retry and bulkhead per target service, all from
+# these "default" settings (an instance named after the service, e.g. user-service, is created on first use).
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # Judged on the last 10 calls, once at least 5 were made
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        # Open when half of them failed, or when 80% took longer than 2.5 s (a service hanging close to the timeout)
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 2500ms
+        slow-call-rate-threshold: 80
+        # Then fail at once for 10 s; afterwards 3 trial calls decide whether it is back
+        wait-duration-in-open-state: 10s
+        automatic-transition-from-open-to-half-open-enabled: true
+        permitted-number-of-calls-in-half-open-state: 3
+        # Only "could not get an answer" counts; business answers (e.g. a 404 for a customer account) are successes
+        record-exceptions:
+          - com.fooddelivery.deliverypartnerservice.exception.RemoteServiceException
+  retry:
+    configs:
+      default:
+        # One more attempt, only when the connection itself failed (ConnectionFailure)
+        max-attempts: 2
+        wait-duration: 200ms
+        retry-exception-predicate: com.fooddelivery.deliverypartnerservice.client.ConnectionFailure
+  bulkhead:
+    configs:
+      default:
+        # At most 20 calls to one service at once; the 21st waits up to 100 ms, then gets "unavailable"
+        max-concurrent-calls: 20
+        max-wait-duration: 100ms
+
+management:
+  # Observability (Phase 14b): metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        # circuitbreakers, retries, bulkheads: state and recent events of the calls to other services
+        include: health, info, circuitbreakers, circuitbreakerevents, retries, bulkheads, prometheus
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Delivery Partner Service
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user=, event= (empty ones are left out).
+    # Loki and Grafana read the trace id from here to link logs and traces.
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} event=%X{eventId} ){'[a-zA-Z]+= ', ''}"
+
+# The shared secret of the internal APIs (/api/v1/internal/**): the other services send it as X-Service-Token.
+# Required (no default) outside the dev profile.
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN}

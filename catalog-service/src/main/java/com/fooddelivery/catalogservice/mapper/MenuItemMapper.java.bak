@@ -1,0 +1,60 @@
+package com.fooddelivery.catalogservice.mapper;
+
+import com.fooddelivery.catalogservice.dto.request.MenuItemRequest;
+import com.fooddelivery.catalogservice.dto.response.MenuItemResponse;
+import com.fooddelivery.catalogservice.dto.response.MenuResponse;
+import com.fooddelivery.catalogservice.entity.Category;
+import com.fooddelivery.catalogservice.entity.MenuItem;
+import org.springframework.stereotype.Component;
+
+@Component
+public class MenuItemMapper {
+
+    /** Copies the owner-editable fields (status and availability are changed by their own operations). */
+    public void applyRequest(MenuItem item, MenuItemRequest request) {
+        item.setName(request.name().trim());
+        item.setDescription(blankToNull(request.description()));
+        item.setPrice(request.price());
+        item.setCategoryId(request.categoryId());
+        item.setFoodType(request.foodType());
+        item.setImageUrl(blankToNull(request.imageUrl()));
+    }
+
+    public MenuItemResponse toResponse(MenuItem item, Category category) {
+        return toResponse(item, category, null);
+    }
+
+    public MenuItemResponse toResponse(MenuItem item, Category category, String restaurantName) {
+        return new MenuItemResponse(
+                item.getId(),
+                item.getRestaurantId(),
+                item.getCategoryId(),
+                category == null ? null : category.getName(),
+                item.getName(),
+                item.getDescription(),
+                item.getPrice(),
+                item.getFoodType(),
+                item.getImageUrl(),
+                item.isAvailable(),
+                item.getStatus(),
+                item.getCreatedAt(),
+                item.getUpdatedAt(),
+                item.getVersion(),
+                restaurantName);
+    }
+
+    public MenuResponse.Item toMenuEntry(MenuItem item) {
+        return new MenuResponse.Item(
+                item.getId(),
+                item.getName(),
+                item.getDescription(),
+                item.getPrice(),
+                item.getFoodType(),
+                item.getImageUrl(),
+                item.isAvailable());
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+}

@@ -1,0 +1,328 @@
+### Food Delivery Platform - Payment Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+### Prerequisite: run order-service.http first (customer, address, restaurant with a menu, open now).
+###
+### Simulated payment provider - test data:
+###   CARD   4111111111111111 succeeds | 4000000000000002 declined | 4000000000009995 insufficient funds
+###   UPI    any name@bank succeeds    | fail@upi declined         | refundfail@upi pays, refunds fail
+###   WALLET any id succeeds           | empty-wallet insufficient balance
+
+@gateway = http://localhost:8080
+
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@ownerEmail = arjun.spicehub@example.com
+@ownerPassword = Owner1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+# Change the run suffix to start a fresh set of orders and payments
+@run = run-0001
+
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+@ownerToken = {{ownerLogin.response.body.$.accessToken}}
+@addressId = {{addresses.response.body.$[0].id}}
+@restaurantId = {{myRestaurants.response.body.$[0].id}}
+@firstItemId = {{menu.response.body.$.sections[0].items[0].id}}
+@upiOrderId = {{upiOrder.response.body.$.id}}
+@cardOrderId = {{cardOrder.response.body.$.id}}
+@paymentId = {{upiPayment.response.body.$.id}}
+
+
+### ============================ SETUP ============================
+
+### 1. Customer login -> customerToken
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}" }
+
+### 2. Customer's addresses -> addressId
+# @name addresses
+GET {{gateway}}/api/v1/users/me/addresses
+Authorization: Bearer {{customerToken}}
+
+### 3. Owner login -> ownerToken, then the restaurant -> restaurantId, then the menu -> firstItemId
+# @name ownerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{ownerEmail}}", "password": "{{ownerPassword}}" }
+
+###
+# @name myRestaurants
+GET {{gateway}}/api/v1/restaurants/mine
+Authorization: Bearer {{ownerToken}}
+
+###
+# @name menu
+GET {{gateway}}/api/v1/restaurants/{{restaurantId}}/menu
+
+
+### ======================= PAY BY UPI =======================
+
+### 4. Cart + checkout with UPI: the order waits for payment -> upiOrderId
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 2 }
+
+###
+# @name upiOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-order-upi
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "UPI" }
+
+### 5. Pay it (201, SUCCESS) -> paymentId
+# @name upiPayment
+POST {{gateway}}/api/v1/payments
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-pay-upi
+Content-Type: application/json
+
+{ "orderId": {{upiOrderId}}, "paymentMethod": "UPI", "upiId": "meera@okhdfc" }
+
+### 6. The same request again: 200, same payment, never charged twice
+POST {{gateway}}/api/v1/payments
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-pay-upi
+Content-Type: application/json
+
+{ "orderId": {{upiOrderId}}, "paymentMethod": "UPI", "upiId": "meera@okhdfc" }
+
+### 7. The order is now PLACED and PAID: the restaurant sees it
+GET {{gateway}}/api/v1/orders/{{upiOrderId}}
+Authorization: Bearer {{customerToken}}
+
+### 8. A second payment for the same order is refused (409)
+POST {{gateway}}/api/v1/payments
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-pay-upi-again
+Content-Type: application/json
+
+{ "orderId": {{upiOrderId}}, "paymentMethod": "UPI", "upiId": "meera@okhdfc" }
+
+
+### ================ CARD DECLINED, THEN ANOTHER CARD ================
+
+### 9. Cart + checkout with CARD -> cardOrderId
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+###
+# @name cardOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-order-card
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "CARD" }
+
+### 10. Declined card: payment FAILED, the order stays open for another try
+POST {{gateway}}/api/v1/payments
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-pay-card-1
+Content-Type: application/json
+
+{
+  "orderId": {{cardOrderId}},
+  "paymentMethod": "CARD",
+  "card": { "number": "4000000000000002", "expiryMonth": 12, "expiryYear": 2030 }
+}
+
+### 11. The order shows the failed attempt in its timeline (still PAYMENT_PENDING)
+GET {{gateway}}/api/v1/orders/{{cardOrderId}}
+Authorization: Bearer {{customerToken}}
+
+### 12. Another card: SUCCESS (only "VISA **** 1111" is stored)
+POST {{gateway}}/api/v1/payments
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-pay-card-2
+Content-Type: application/json
+
+{
+  "orderId": {{cardOrderId}},
+  "paymentMethod": "CARD",
+  "card": { "number": "4111111111111111", "expiryMonth": 12, "expiryYear": 2030 }
+}
+
+### 13. My payments for that order (both attempts)
+GET {{gateway}}/api/v1/payments?orderId={{cardOrderId}}
+Authorization: Bearer {{customerToken}}
+
+
+### ===================== ADMIN: MONITORING =====================
+
+### 14. Admin login -> adminToken
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### 15. All payments, newest first
+GET {{gateway}}/api/v1/admin/payments?page=0&size=20
+Authorization: Bearer {{adminToken}}
+
+### 16. Failed payment monitoring
+GET {{gateway}}/api/v1/admin/payments?status=FAILED
+Authorization: Bearer {{adminToken}}
+
+### 17. Today's totals per status and method
+GET {{gateway}}/api/v1/admin/payments/summary
+Authorization: Bearer {{adminToken}}
+
+### 18. Payment details: refunds, and the events published for it
+GET {{gateway}}/api/v1/admin/payments/{{paymentId}}
+Authorization: Bearer {{adminToken}}
+
+
+### ================ REFUNDS (automatic since Phase 7, via Kafka) ================
+
+### 19. Manual refund while the order is still running: 409 (cancel it first)
+POST {{gateway}}/api/v1/admin/payments/{{paymentId}}/refunds
+Authorization: Bearer {{adminToken}}
+Idempotency-Key: {{run}}-refund-early
+Content-Type: application/json
+
+{ "reason": "Customer asked" }
+
+### 20. Cancel the paid order (order-service, audited).
+###     order-service publishes OrderCancelled; payment-service refunds the payment automatically.
+PUT {{gateway}}/api/v1/admin/orders/{{upiOrderId}}/cancel
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Restaurant closed early tonight" }
+
+### 21. A moment later: payment REFUNDED, one refund requested by SYSTEM,
+###     reason "Order <id> cancelled by admin: Restaurant closed early tonight"
+GET {{gateway}}/api/v1/admin/payments/{{paymentId}}
+Authorization: Bearer {{adminToken}}
+
+### 22. Nothing is left to refund: a manual refund is now refused (409)
+###     (manual and partial refunds are for delivered orders, e.g. a missing item; DELIVERED comes in Phase 10)
+POST {{gateway}}/api/v1/admin/payments/{{paymentId}}/refunds
+Authorization: Bearer {{adminToken}}
+Idempotency-Key: {{run}}-refund-late
+Content-Type: application/json
+
+{ "amount": 100.00, "reason": "Goodwill" }
+
+### 23. Refund list for the payment
+GET {{gateway}}/api/v1/admin/refunds?paymentId={{paymentId}}
+Authorization: Bearer {{adminToken}}
+
+### 24. The order now shows paymentStatus REFUNDED (payment-service told order-service)
+GET {{gateway}}/api/v1/admin/orders/{{upiOrderId}}
+Authorization: Bearer {{adminToken}}
+
+### 25. Failed refunds to follow up (e.g. pay with refundfail@upi, then cancel the order)
+GET {{gateway}}/api/v1/admin/refunds?status=FAILED
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= EVENTS AND SAGA (Kafka, Phases 7-8) =======================
+### payment-service writes PaymentStatusChanged (SUCCESS, FAILED, REFUNDED; key = orderId) to its
+### transactional outbox; order-service moves the order on. Request 18 lists a payment's events
+### (PENDING while Kafka is down, then PUBLISHED).
+### It consumes: OrderCreated (keeps a copy of the order: payable even while order-service is down),
+### OrderCancelled (refund if PAID) and OrderPaymentRejected (refund a payment that came too late).
+### Messages and consumer groups: Kafka UI http://localhost:8090
+
+### Event schemas in Schema Registry
+GET http://localhost:8091/subjects/fooddelivery.payment.status-changed-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.order.created-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.order.cancelled-value/versions/latest
+
+###
+GET http://localhost:8091/subjects/fooddelivery.order.payment-rejected-value/versions/latest
+
+### ============== RAZORPAY CHECKOUT (PAYMENT_PROVIDER=RAZORPAY) ==============
+### Needs PAYMENT_PROVIDER=RAZORPAY and Test Mode keys in .env (README-LOCAL-TESTING.md, "Razorpay payments").
+### The customer pays in Razorpay Checkout in the browser (the React payment page); these requests show the
+### server's side. With PAYMENT_PROVIDER=SIMULATED, R1 answers enabled=false and R3 is refused (422).
+
+@rzpAppOrderId = {{rzpAppOrder.response.body.$.id}}
+@rzpOrderId = {{rzpCheckout.response.body.$.razorpayOrderId}}
+
+### R1. Is Razorpay on? enabled, keyId (public) and testMode - never the key secret
+GET {{gateway}}/api/v1/payments/razorpay/config
+Authorization: Bearer {{customerToken}}
+
+### R2. Cart + checkout with UPI: the order waits for payment -> rzpAppOrderId
+PUT {{gateway}}/api/v1/cart/items/{{firstItemId}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+###
+# @name rzpAppOrder
+POST {{gateway}}/api/v1/orders
+Authorization: Bearer {{customerToken}}
+Idempotency-Key: {{run}}-order-razorpay
+Content-Type: application/json
+
+{ "addressId": {{addressId}}, "paymentMethod": "UPI" }
+
+### R3. Start paying: payment-service creates the Razorpay order for the order's total (in paise) -> rzpOrderId
+### Answer: paymentId, razorpayOrderId, keyId, amount (paise), currency, merchantName, description, preferredMethod
+# @name rzpCheckout
+POST {{gateway}}/api/v1/payments/razorpay/orders
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "orderId": {{rzpAppOrderId}} }
+
+### R4. The same again (reload, second tab): the same Razorpay order, never a second one
+POST {{gateway}}/api/v1/payments/razorpay/orders
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "orderId": {{rzpAppOrderId}} }
+
+### R5. Confirm a payment. Checkout's handler returns razorpay_payment_id and razorpay_signature; the React page
+### sends them here itself. A made-up signature (as below) is refused with 422 and changes nothing: paste the
+### real values from the browser's network tab to see 200 with status SUCCESS.
+POST {{gateway}}/api/v1/payments/razorpay/verify
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "razorpayOrderId": "{{rzpOrderId}}", "razorpayPaymentId": "pay_PasteFromCheckout", "razorpaySignature": "0123456789abcdef" }
+
+### R6. A webhook with a wrong signature: 401 (Razorpay signs each webhook with RAZORPAY_WEBHOOK_SECRET).
+### To send a correctly signed one, see README-LOCAL-TESTING.md ("Send a signed test webhook").
+POST {{gateway}}/api/v1/payments/razorpay/webhook
+X-Razorpay-Signature: 0000000000000000000000000000000000000000000000000000000000000000
+X-Razorpay-Event-Id: evt_Sample00000001
+Content-Type: application/json
+
+{ "event": "payment.captured", "payload": { "payment": { "entity": { "id": "pay_Sample00000001", "order_id": "{{rzpOrderId}}", "status": "captured", "amount": 100, "currency": "INR" } } } }
+
+### R7. My payments for that order: provider RAZORPAY, providerOrderId, status (PROCESSING until paid, then SUCCESS)
+GET {{gateway}}/api/v1/payments?orderId={{rzpAppOrderId}}
+Authorization: Bearer {{customerToken}}
+
+
+### ========================= OPERATIONS =========================
+
+### Health (direct)
+GET http://localhost:8085/actuator/health
+
+### Swagger UI: http://localhost:8085/swagger-ui.html
+GET http://localhost:8085/v3/api-docs

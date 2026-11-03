@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Food Delivery Platform · Development Completion</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ================================================================ COVER -->
+<section class="cover">
+  <div class="cover-band">
+    <div class="cover-kicker">Development Completion &amp; Technical Handover</div>
+    <h1>Food Delivery Platform</h1>
+    <p class="cover-sub">What has been built: services, project structure, interactions, workflows, configuration, testing,
+      deployment and the completed feature set.</p>
+    <div class="cover-tags">
+      <span>16 Spring Boot applications</span><span>15 Kafka topics</span><span>77 database migrations</span>
+      <span>921 front-end tests</span><span>React 19 web application</span>
+    </div>
+  </div>
+  <div class="cover-abstract">
+    <div><b>Built</b><span>16 Spring Boot applications and one web application with customer, owner, partner and admin
+      areas.</span></div>
+    <div><b>Verified</b><span>190 back-end test classes, 8 end-to-end suites and 921 front-end tests, with quality gates on
+      every build.</span></div>
+    <div><b>Handed over</b><span>Source code, infrastructure scripts, configuration reference, runbook and documentation.</span></div>
+  </div>
+  <dl class="cover-meta">
+    <div><dt>Document</dt><dd>Development Completion Document</dd></div>
+    <div><dt>Version</dt><dd>1.0 · 14 October 2026</dd></div>
+    <div><dt>Intended readers</dt><dd>Client stakeholders, developers, DevOps engineers, support team</dd></div>
+    <div><dt>Status of delivery</dt><dd>Phases 1 to 18 and extensions complete</dd></div>
+    <div><dt>Prepared by</dt><dd>Platform engineering team</dd></div>
+    <div><dt>Companion document</dt><dd>Project Proposal (architecture, technology, security, deployment)</dd></div>
+  </dl>
+</section>
+
+<!-- ================================================================ CONTENTS -->
+<h1 style="break-before: auto">Contents</h1>
+<ol class="toc">
+  <li><b>1</b> Executive summary</li>
+  <li><b>2</b> Delivery status</li>
+  <li><b>3</b> Architecture as built</li>
+  <li><b>4</b> Project structure</li>
+  <li><b>5</b> Service reference</li>
+  <li><b>6</b> Service interactions</li>
+  <li><b>7</b> Key business workflows</li>
+  <li><b>8</b> Configuration</li>
+  <li><b>9</b> Data management</li>
+  <li><b>10</b> Security as implemented</li>
+  <li><b>11</b> Resilience and observability</li>
+  <li><b>12</b> Testing and code quality</li>
+  <li><b>13</b> Deployment and operations</li>
+  <li><b>14</b> Completed features</li>
+  <li><b>15</b> Known limitations and recommendations</li>
+  <li><b>16</b> Handover checklist and references</li>
+</ol>
+
+<div class="callout note" style="margin-top: 8mm">
+  <div class="callout-title">How to read this document</div>
+  <p>Sections 1, 2 and 14 summarise what was delivered and are written for every reader. Sections 3 to 9 are the
+    technical reference for developers. Sections 10 to 13 cover security, operations and quality for architects and
+    DevOps engineers. Section 15 lists the open items and section 16 the handover checklist.</p>
+</div>
+
+<!-- ================================================================ 1 -->
+<h1><span class="num">1</span>Executive summary</h1>
+
+<p class="lead">The Food Delivery Platform has been implemented as proposed: an event-driven microservices back end
+  behind an API gateway, and one responsive web application with separate areas for customers, restaurant owners,
+  delivery partners and platform administrators. Every business flow, from registration to a delivered and reviewed
+  order, works end to end and is covered by automated tests.</p>
+
+<div class="kpis">
+  <div class="kpi"><b>16</b><span>Spring Boot applications (gateway, 13 domain services, 2 AI services)</span></div>
+  <div class="kpi"><b>1,304</b><span>production Java classes</span></div>
+  <div class="kpi"><b>15</b><span>Kafka topics with Avro schemas, each with a dead-letter topic</span></div>
+  <div class="kpi"><b>77</b><span>versioned Flyway database migrations across 12 databases</span></div>
+  <div class="kpi"><b>190</b><span>back-end test classes, plus 8 end-to-end suites</span></div>
+  <div class="kpi"><b>921</b><span>front-end tests in 98 test files</span></div>
+  <div class="kpi"><b>613</b><span>front-end source files (React 19, TypeScript)</span></div>
+  <div class="kpi"><b>19</b><span>API gateway routes with per-service traffic rules</span></div>
+</div>
+
+<h2>Highlights</h2>
+<ul>
+  <li><strong>Complete order lifecycle:</strong> browse and search, cart with coupons, checkout with idempotency, online
+    payment (simulated or Razorpay) or cash on delivery, restaurant preparation, automatic dispatch to a delivery partner,
+    pickup, delivery, review.</li>
+  <li><strong>Reliable integration:</strong> transactional outbox in every publishing service, idempotent consumers,
+    dead-letter topics, choreographed saga with automatic refunds and compensations.</li>
+  <li><strong>Real-time experience:</strong> live updates over WebSocket in every area of the web application; a live
+    tracking page with a map (Leaflet and OpenStreetMap, no paid map service).</li>
+  <li><strong>Administration:</strong> dashboard, reports, approvals, coupons, refunds, delivery reassignment, support chat
+    inbox and a tamper-proof platform-wide audit log.</li>
+  <li><strong>AI assistant:</strong> a role-aware assistant (Spring AI with a local Ollama model) for all four roles, with
+    voice input and read-aloud, that can prepare actions which the user confirms with a button.</li>
+  <li><strong>Security:</strong> signed JWT access tokens checked at the gateway and again in every service, rotating
+    refresh cookies per area, role and ownership checks on every API, and a shared secret on the internal APIs.</li>
+  <li><strong>Operability:</strong> metrics, logs and traces with provisioned Grafana dashboards; resilience patterns at
+    the gateway and on every service-to-service call; quality gates on every build.</li>
+</ul>
+
+<div class="callout warn">
+  <div class="callout-title">Before any public deployment</div>
+  <p>Phase 18 (token-based security with JWT) is complete: every API call carries a short-lived access token that the
+    gateway and each service check, and the internal APIs require the services' shared secret. Before a public
+    deployment, still terminate HTTPS at the edge, keep the service ports on a private network and move the secrets
+    into a secrets manager (section 10).</p>
+</div>
+
+<!-- ================================================================ 2 -->
+<h1><span class="num">2</span>Delivery status</h1>
+
+<table>
+  <thead><tr><th class="num" style="width: 8%">Phase</th><th>Deliverable</th><th style="width: 15%">Status</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td>Foundation and API gateway</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">2</td><td>User service (registration, sign-in, profiles, addresses, roles)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">3</td><td>Restaurant service (onboarding, approval, lifecycle, hours)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">4</td><td>Catalog service (categories, menus, prices, availability)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">5</td><td>Order service (cart, checkout, lifecycle, restaurant orders)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">6</td><td>Payment service (payments, refunds, provider strategy)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">7</td><td>Kafka and Schema Registry (event contracts)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">8</td><td>Saga and transactional outbox</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">9</td><td>Notification service (e-mail, SMS, push, inbox, live updates)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">10</td><td>Delivery service (dispatch, offers, pickup, delivery)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">11</td><td>Search service with Elasticsearch</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">12</td><td>Redis caching and rate limiting</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">13</td><td>Promotion service (coupons); admin service (dashboard, reports, audit log)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">14</td><td>Resilience (Resilience4j) and observability (metrics, logs, traces)</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">15</td><td>Code quality gates and end-to-end integration tests</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">16</td><td>Web application: admin area</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">17</td><td>Web application: customer area</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td class="num">18</td><td>Security: JWT authentication and authorisation</td><td><span class="status done">Complete</span></td></tr>
+  </tbody>
+</table>
+
+<h2>Extensions delivered beyond the phase plan</h2>
+<table>
+  <thead><tr><th style="width: 30%">Extension</th><th>Content</th><th style="width: 15%">Status</th></tr></thead>
+  <tbody>
+    <tr><td>Restaurant-owner area</td><td>Owner sign-in and registration, restaurant submission, dashboard, order board, menu management, reviews.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>Delivery-partner area</td><td>Partner sign-in and registration, online/offline, offers, current delivery, history, profile.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>Delivery Partner service</td><td>Partner profiles and suspension moved into their own service (event contracts 1.7.0); dispatch stays in the delivery service.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>Reviews and ratings</td><td>Review service: order and dish ratings, public ratings, admin review screens.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>Support chat</td><td>Chat service: one conversation per user with a shared admin inbox, live delivery of messages.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>Razorpay payments</td><td>Real payment provider behind the <code>PAYMENT_PROVIDER</code> switch: hosted Checkout, signature verification, webhook, refunds.</td><td><span class="status done">Complete</span><br><span class="small muted">off by default</span></td></tr>
+    <tr><td>Live tracking map</td><td>Tracking page with status stepper, partner card and a map of the rider's real GPS position, sent from the partner's browser while on the way and shown only to that order's customer (latest position only). "Use my current location" pins customer addresses. A labelled simulation remains for demos.</td><td><span class="status done">Complete</span><br><span class="small muted">no route or arrival time</span></td></tr>
+    <tr><td>AI assistant: questions</td><td>Read-only tools for customers, owners, partners and admins, rendered as cards, tables and links.</td><td><span class="status done">Complete</span></td></tr>
+    <tr><td>AI assistant: confirmed actions</td><td>Prepare-then-confirm changes for all roles (cancel or accept orders, mark deliveries, reassign...), audited. A change request always gets a prepared action: the model is asked once more, then the server prepares it from the user's own words.</td><td><span class="status done">Complete</span><br><span class="small muted">verified with the real model</span></td></tr>
+    <tr><td>AI assistant: chat UI and voice</td><td>Redesigned chat panel; speech input and read-aloud through the browser's Web Speech API, with fallbacks.</td><td><span class="status done">Complete</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 3 -->
+<h1><span class="num">3</span>Architecture as built</h1>
+
+<figure class="figure">
+  <img src="architecture.svg" alt="Architecture as built">
+  <figcaption>Figure 1. Components as implemented. All browser traffic enters through the API gateway; services publish
+    and consume Avro events through Kafka; each service owns its data store.</figcaption>
+</figure>
+
+<h2>3.1 Request path</h2>
+<ol class="steps">
+  <li>The web application (Vite dev server on port 5180 in development) calls the API gateway on port 8080 over REST, and
+    keeps one WebSocket open at <code>/ws/v1/live</code> for live updates.</li>
+  <li>The gateway checks the caller's access token (if any), removes any identity header a client sent, assigns or
+    forwards an <code>X-Request-Id</code>, applies the route's rate limit, circuit breaker, timeouts and (for GET only)
+    retries, and forwards the request to the owning service.</li>
+  <li>The service checks the access token again, validates the request, checks the caller's role and ownership, and performs the change in one database
+    transaction, writing any resulting event to its outbox table in the same transaction.</li>
+  <li>The service's outbox relay publishes the event to Kafka within about half a second; consuming services apply it
+    exactly once and may publish follow-up events.</li>
+  <li>The notification service turns relevant events into e-mails, SMS, push and in-app messages, and into small live
+    hints sent over the WebSocket; the browser then re-reads the affected data through the normal REST APIs.</li>
+</ol>
+
+<h2>3.2 Architecture decisions recorded</h2>
+<table>
+  <thead><tr><th style="width: 30%">Decision</th><th>Outcome</th></tr></thead>
+  <tbody>
+    <tr><td>Database per service</td><td>12 MySQL databases with one user each; no service reads another's tables.</td></tr>
+    <tr><td>Outbox over change data capture</td><td>The transactional outbox is the publishing mechanism. Debezium CDC was evaluated in shadow mode (Compose profile <code>cdc</code>) and kept optional (<code>docs/decision-debezium-cdc.md</code>).</td></tr>
+    <tr><td>Delivery partner service split</td><td>Profiles and suspension in the delivery partner service; availability and assignment stay with deliveries, because assigning a delivery and making its partner busy must be one transaction (<code>docs/decision-delivery-partner-service.md</code>).</td></tr>
+    <tr><td>Search as a read model</td><td>Elasticsearch indexes built from events; MySQL stays the source of truth; consistency check and repair endpoints.</td></tr>
+    <tr><td>Admin as a composition service</td><td>The admin service owns no business data; it calls the owning services in parallel as the admin and stores only audit copies.</td></tr>
+    <tr><td>Idempotency keys in MySQL</td><td>Stored with the order or payment they protect, in the same transaction, never in Redis.</td></tr>
+    <tr><td>Razorpay over plain REST</td><td>The official SDK pulls in outdated OkHttp and Okio versions (one with a known CVE) that clash with the OpenTelemetry exporter.</td></tr>
+    <tr><td>Local language model</td><td>Ollama with a 4-billion-parameter Qwen 3 model runs on the platform's own hardware; no data goes to external AI services.</td></tr>
+  </tbody>
+</table>
+
+<h2>3.3 Technology versions as built</h2>
+<table>
+  <thead><tr><th style="width: 26%">Technology</th><th>Version</th></tr></thead>
+  <tbody>
+    <tr><td>Java / Spring Boot</td><td>Java 21 (LTS) / Spring Boot 4.1.1</td></tr>
+    <tr><td>Spring Cloud</td><td>2025.1.3 (Gateway 5.0, WebFlux server; Spring Cloud CircuitBreaker 5.0)</td></tr>
+    <tr><td>Spring AI / model</td><td>Spring AI 2.0.1 with Ollama; model <code>qwen3:4b-instruct-2507-q4_K_M</code> (configurable)</td></tr>
+    <tr><td>MySQL</td><td>8.4 (LTS), Flyway migrations</td></tr>
+    <tr><td>Kafka / Schema Registry / Avro</td><td>Apache Kafka 4.2 in KRaft mode (Confluent Platform 8.2.4) / Schema Registry 8.2.4 / Avro 1.12.2</td></tr>
+    <tr><td>Elasticsearch</td><td>9.4.5 (Spring Data Elasticsearch 6.1)</td></tr>
+    <tr><td>Redis</td><td>8.10 (Spring Data Redis 4.1, Lettuce)</td></tr>
+    <tr><td>Resilience4j</td><td>2.4.0</td></tr>
+    <tr><td>Observability</td><td>Prometheus 3.15, Grafana 13.2, Tempo 2.10, Jaeger 2.21, Loki 3.7, Grafana Alloy 1.20</td></tr>
+    <tr><td>Code quality</td><td>Checkstyle 14.3, SpotBugs 4.10, JaCoCo 0.8.15, ArchUnit 1.5, SonarQube Community Build 26.9</td></tr>
+    <tr><td>Web application</td><td>React 19.3, TypeScript 6.0, Vite 8.3, React Router 8.4, Redux Toolkit 2.13, TanStack Query 5, Axios 1.20, Tailwind CSS 4.3, Recharts 3.10, Leaflet; ESLint 10, Prettier 3.9, Vitest 5</td></tr>
+    <tr><td>Development tools</td><td>Mailpit 1.31, Kafka UI (kafbat) 1.5.0, Kibana 9.4.5, phpMyAdmin 5.2.3</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 4 -->
+<h1><span class="num">4</span>Project structure</h1>
+
+<h2>4.1 Repository layout</h2>
+<p>One repository holds every service, the shared library, the web application, the tests and the infrastructure. Each
+  service is an independent Maven project with its own wrapper, so it builds and deploys on its own.</p>
+<table class="tree">
+  <thead><tr><th style="width: 34%">Folder or file</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td>docker-compose.yml</td><td>Infrastructure; the services and the observability stack are kept in it, commented out</td></tr>
+    <tr><td>.env.example</td><td>Template of local settings; copy to <code>.env</code> (git-ignored)</td></tr>
+    <tr><td>start-local.ps1</td><td>Runs the services and the web application on the developer's machine</td></tr>
+    <tr><td>README.md</td><td>Full technical reference: APIs, design notes, operations</td></tr>
+    <tr><td>README-LOCAL-TESTING.md</td><td>Manual testing guide (accounts, payments, scenarios)</td></tr>
+    <tr><td>docs/</td><td>Architecture decisions, AI assistant design, ratings; <code>docs/handover</code> holds these documents</td></tr>
+    <tr><td>infrastructure/mysql/init/</td><td>Creates one database and one user per service</td></tr>
+    <tr><td>infrastructure/observability/</td><td>Prometheus, Tempo, Jaeger, Loki, Alloy and Grafana configuration and dashboards</td></tr>
+    <tr><td>infrastructure/kibana/, debezium/</td><td>Kibana data views; optional change data capture (shadow mode)</td></tr>
+    <tr><td>quality/</td><td>Shared Checkstyle and SpotBugs rules, SonarQube scan script, benchmarks</td></tr>
+    <tr><td>event-contracts/</td><td>Shared library: Avro schemas of all events and the topic names (version 1.7.0)</td></tr>
+    <tr><td>e2e-tests/</td><td>End-to-end tests of the running platform through the API gateway</td></tr>
+    <tr><td>front-app/</td><td>React web application</td></tr>
+  </tbody>
+</table>
+<table class="tree">
+  <thead><tr><th style="width: 34%">Service folder</th><th>Responsibility</th><th class="num" style="width: 9%">Port</th><th style="width: 22%">Data</th></tr></thead>
+  <tbody>
+    <tr><td>api-gateway/</td><td>Spring Cloud Gateway</td><td class="num">8080</td><td>Redis</td></tr>
+    <tr><td>user-service/</td><td>Users, sign-in, addresses</td><td class="num">8081</td><td>user_db</td></tr>
+    <tr><td>restaurant-service/</td><td>Restaurants and their lifecycle</td><td class="num">8082</td><td>restaurant_db</td></tr>
+    <tr><td>catalog-service/</td><td>Categories and menus</td><td class="num">8083</td><td>catalog_db</td></tr>
+    <tr><td>order-service/</td><td>Cart, checkout, orders</td><td class="num">8084</td><td>order_db</td></tr>
+    <tr><td>payment-service/</td><td>Payments and refunds</td><td class="num">8085</td><td>payment_db</td></tr>
+    <tr><td>notification-service/</td><td>Notifications and live updates</td><td class="num">8086</td><td>notification_db</td></tr>
+    <tr><td>delivery-service/</td><td>Deliveries and dispatch</td><td class="num">8087</td><td>delivery_db</td></tr>
+    <tr><td>search-service/</td><td>Search</td><td class="num">8088</td><td>Elasticsearch</td></tr>
+    <tr><td>promotion-service/</td><td>Coupons</td><td class="num">8089</td><td>promotion_db</td></tr>
+    <tr><td>admin-service/</td><td>Dashboard, reports, platform audit log</td><td class="num">8092</td><td>admin_db</td></tr>
+    <tr><td>review-service/</td><td>Ratings and reviews</td><td class="num">8094</td><td>review_db</td></tr>
+    <tr><td>chat-service/</td><td>Support chat</td><td class="num">8096</td><td>chat_db</td></tr>
+    <tr><td>ai-mcp-client/</td><td>AI assistant: browser-facing side</td><td class="num">8097</td><td>Redis</td></tr>
+    <tr><td>ai-mcp-server/</td><td>AI assistant: agent and tools</td><td class="num">8098</td><td>Redis, Ollama</td></tr>
+    <tr><td>delivery-partner-service/</td><td>Delivery partners' profiles and suspension</td><td class="num">8099</td><td>delivery_partner_db</td></tr>
+  </tbody>
+</table>
+
+<h2>4.2 Inside a domain service</h2>
+<p>Every domain service follows the same package layout under <code>com.fooddelivery.&lt;service&gt;</code>, enforced by
+  architecture tests, so a developer who knows one service can navigate all of them.</p>
+<div class="grid-2">
+<table class="tree">
+  <thead><tr><th style="width: 34%">Package</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td>controller</td><td>Thin REST controllers, no business logic</td></tr>
+    <tr><td>service</td><td>Business rules and transactions</td></tr>
+    <tr><td>repository</td><td>Spring Data JPA repositories</td></tr>
+    <tr><td>entity</td><td>JPA entities and enums</td></tr>
+    <tr><td>dto/request</td><td>Validated request records</td></tr>
+    <tr><td>dto/response</td><td>Response records (entities never returned)</td></tr>
+    <tr><td>mapper</td><td>Entity to DTO conversion</td></tr>
+  </tbody>
+</table>
+<table class="tree">
+  <thead><tr><th style="width: 34%">Package</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td>exception</td><td>Business exceptions, ProblemDetail handler</td></tr>
+    <tr><td>validation</td><td>Reusable validation, business validators</td></tr>
+    <tr><td>client</td><td>Calls to other services (timeouts, request id)</td></tr>
+    <tr><td>kafka/producer</td><td>Events into the outbox; OutboxRelay publishes</td></tr>
+    <tr><td>kafka/consumer</td><td>Kafka listeners, delegating to services</td></tr>
+    <tr><td>web</td><td>Request id, the caller from the access token, the internal service token check</td></tr>
+    <tr><td>config</td><td>Configuration, security rules, properties, OpenAPI</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Each service also contains <code>src/main/resources/db/migration</code> (Flyway scripts),
+  <code>application.yml</code>, a multi-stage <code>Dockerfile</code>, the Maven wrapper and an <code>.http</code> file
+  with ready-made API requests.</p>
+
+<h2>4.3 The AI services</h2>
+<p><code>ai-mcp-server</code> is organised by responsibility: <code>agent</code> (the Spring AI loop and system prompts),
+  <code>tool</code> (role-specific tools, each calling one fixed API through the gateway), <code>proposal</code> and
+  <code>action</code> (prepared orders and changes waiting for confirmation, stored in Redis), <code>draft</code>,
+  <code>client</code>, <code>security</code>, <code>support</code> (audit logging, name matching), <code>metrics</code>,
+  <code>controller</code>, <code>web</code> and <code>config</code>. <code>ai-mcp-client</code> holds the browser-facing
+  controllers, identity verification, conversation storage, rate limits and the client of the agent server.</p>
+
+<h2>4.4 The web application</h2>
+<table class="tree">
+  <thead><tr><th style="width: 24%">front-app/src/</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td>api/</td><td>Axios instance, API client, error mapping, TanStack Query client</td></tr>
+    <tr><td>components/</td><td>Common components (buttons, tables, toasts, dialogs) and business components (assistant, live tracking, ...)</td></tr>
+    <tr><td>context/</td><td>Layout, toast and assistant contexts</td></tr>
+    <tr><td>hooks/</td><td>Shared hooks, TanStack Query hooks per API area, voice input and output</td></tr>
+    <tr><td>layouts/</td><td>Admin, customer, owner and partner layouts</td></tr>
+    <tr><td>pages/</td><td>Admin, Analytics, AuditLog, Calendar, Category, Chat, Coupon, Customer, Dashboard, Delivery, Food, Notification, Order, Owner, Partner, Payment, Restaurant, Review, Search, Storefront</td></tr>
+    <tr><td>realtime/</td><td>Reconnecting WebSocket, live-update provider, cache invalidation rules</td></tr>
+    <tr><td>services/</td><td>One module per back-end area (orders, payments, deliveries, assistant, ...)</td></tr>
+    <tr><td>store/</td><td>Redux Toolkit store: session and list slices</td></tr>
+    <tr><td>theme/</td><td>Design tokens, light and dark themes</td></tr>
+    <tr><td>types/</td><td>TypeScript types of the API</td></tr>
+    <tr><td>utils/</td><td>Formatting, constants and routes, error messages</td></tr>
+  </tbody>
+</table>
+<p>The application has four areas: <code>/admin</code>, <code>/customer</code>, <code>/owner</code> and
+  <code>/partner</code>. Environment files <code>.env.development</code>, <code>.env.demo</code>, <code>.env.uat</code>,
+  <code>.env.preprod</code> and <code>.env.production</code> configure each build.</p>
+
+<!-- ================================================================ 5 -->
+<h1><span class="num">5</span>Service reference</h1>
+
+<p>Each card lists the service's responsibility, data, main APIs, events and dependencies. Size is given as production
+  classes / test classes / database migrations. Full API tables and design notes are in <code>README.md</code>.</p>
+
+<div class="svc"><div class="svc-head"><b>API Gateway</b><span>api-gateway · 8080 · 8 / 6 / –</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Single entry point: 19 routes, per-service rate limits (Redis token buckets per client IP), connect and response timeouts, GET-only retries, circuit breakers with ProblemDetail fallbacks (503/504 with <code>Retry-After</code>), request id, WebSocket route for live updates.</dd>
+  <dt>Configuration</dt><dd><code>app.gateway.services</code> table in <code>application.yml</code>; validated at start-up (the gateway refuses inconsistent values).</dd>
+  <dt>Depends on</dt><dd>Redis (rate limits; requests pass if Redis is down).</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>User service</b><span>user-service · 8081 · user_db · 85 / 8 / 5</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Registration (customer, restaurant owner, delivery partner), sign-in with BCrypt passwords, profile, password change, addresses with a default, admin user search, activation, deactivation and role changes (audited); bootstrap of the first platform administrator.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/auth/register|login</code>, <code>/api/v1/users/me</code>, <code>/me/addresses</code>, <code>/api/v1/admin/users</code>, internal <code>/api/v1/internal/users/{id}</code>.</dd>
+  <dt>Publishes</dt><dd><code>UserRegistered</code>, <code>AdminActionAudited</code>.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Restaurant service</b><span>restaurant-service · 8082 · restaurant_db · 105 / 14 / 7</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Restaurant submission with documents, admin review (approve, reject, activate, deactivate, suspend), profile and weekly opening hours, "open now"; optimistic locking with <code>version</code>; cached public page.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/restaurants</code>, <code>/api/v1/restaurants/mine</code>, <code>/api/v1/admin/restaurants</code>.</dd>
+  <dt>Publishes / calls</dt><dd><code>RestaurantChanged</code>, <code>AdminActionAudited</code> / user-service (owner details).</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Catalog service</b><span>catalog-service · 8083 · catalog_db · 110 / 14 / 9</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Global categories (create, rename, reorder, activate, delete) and restaurant menus: dishes, prices, sold-out switch, owner hide/show, admin block; cached menus and categories; local snapshot of restaurants.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/categories</code>, <code>/api/v1/restaurants/{id}/menu</code>, <code>/api/v1/restaurants/mine/{id}/menu-items</code>, <code>/api/v1/admin/categories</code>, <code>/api/v1/admin/menu-items</code>.</dd>
+  <dt>Events</dt><dd>Publishes <code>CategoryChanged</code>, <code>MenuItemChanged</code>; consumes <code>RestaurantChanged</code>.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Order service</b><span>order-service · 8084 · order_db · 127 / 20 / 9</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Cart with live prices, delivery fee, 5% tax and coupon; checkout with <code>Idempotency-Key</code>; order lifecycle and timeline; restaurant order board (accept, reject, preparing, ready); cancellations; unpaid-order timeout (15 min); sales summaries and statistics.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/cart</code>, <code>/api/v1/orders</code>, <code>/api/v1/restaurants/mine/{id}/orders</code>, <code>/api/v1/admin/orders</code>.</dd>
+  <dt>Events</dt><dd>Publishes <code>OrderCreated</code>, <code>OrderStatusChanged</code>, <code>OrderCancelled</code>, <code>OrderPaymentRejected</code>; consumes <code>PaymentStatusChanged</code>, <code>DeliveryStatusChanged</code>.</dd>
+  <dt>Calls</dt><dd>user (customer, address), restaurant (open, name), catalog (prices, stock), promotion (coupon reservation).</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Payment service</b><span>payment-service · 8085 · payment_db · 105 / 11 / 11</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Payments by card, UPI and wallet through a strategy per method; provider switch <code>SIMULATED</code> / <code>RAZORPAY</code>; refunds (full, partial, automatic) with amount reservation; failed-refund recovery; Razorpay Checkout, signature verification and webhook.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/payments</code>, <code>/api/v1/payments/razorpay/*</code>, <code>/api/v1/admin/payments</code>, <code>/api/v1/admin/refunds</code>.</dd>
+  <dt>Events</dt><dd>Publishes <code>PaymentStatusChanged</code>; consumes <code>OrderCreated</code>, <code>OrderCancelled</code>, <code>OrderPaymentRejected</code>.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Notification service</b><span>notification-service · 8086 · notification_db · 96 / 13 / 5</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Event-driven e-mail (SMTP), SMS and push (simulated in development), in-app inbox; dispatcher with retries (10 s, 1 min, 5 min, 15 min) and admin resend; live WebSocket hints with audience rules; online presence for the chat inbox.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/notifications</code>, <code>/api/v1/admin/notifications</code>, WebSocket <code>/ws/v1/live</code>.</dd>
+  <dt>Consumes</dt><dd>User, restaurant, order, payment, delivery and chat events.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Delivery service</b><span>delivery-service · 8087 · delivery_db · 116 / 9 / 12</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Deliveries and dispatch: an assignment job every 5 s offers waiting deliveries to the longest-waiting available partner in the restaurant's city (<code>FOR UPDATE SKIP LOCKED</code>); 2-minute accept timeout; pickup and delivery with cash collection; partner availability; admin search, delayed deliveries and reassignment.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/delivery/partners/me/availability</code>, <code>/api/v1/delivery/deliveries/mine</code>, <code>/api/v1/delivery/orders/{orderId}</code>, <code>/api/v1/admin/deliveries</code>.</dd>
+  <dt>Events</dt><dd>Publishes <code>DeliveryStatusChanged</code>, <code>DeliveryPartnerStatusChanged</code>; consumes order, restaurant and <code>DeliveryPartnerChanged</code> events.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Delivery Partner service</b><span>delivery-partner-service · 8099 · delivery_partner_db · 75 / 6 / 4</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Partner profiles (name, phone, vehicle, city) created from registration; admin search, suspension and reactivation (audited); a copy of each partner's work status for display.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/delivery/partners/me</code>, <code>/api/v1/admin/delivery-partners</code> (same URLs as before the split, routed by the gateway).</dd>
+  <dt>Events</dt><dd>Publishes <code>DeliveryPartnerChanged</code>; consumes <code>UserRegistered</code>, <code>DeliveryPartnerStatusChanged</code>.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Search service</b><span>search-service · 8088 · Elasticsearch · 56 / 9 / –</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Restaurant, dish and category indexes built from events; full-text search with typo tolerance, geo distance, facets, sorting and autocomplete; index health, consistency check and repair.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/search/restaurants|foods|categories|suggest</code>, <code>/api/v1/admin/search/*</code>.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Promotion service</b><span>promotion-service · 8089 · promotion_db · 83 / 6 / 6</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Coupons (fixed or percentage, minimum order, validity, restaurant, total and per-customer limits); reservation at checkout with row locking; use applied, redeemed, released or expired from order events.</dd>
+  <dt>Main APIs</dt><dd><code>/api/v1/coupons</code>, <code>/api/v1/admin/coupons</code>, internal reservation API used by order-service.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Review service</b><span>review-service · 8094 · review_db · 74 / 15 / 3</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>One review per delivered order with rating, tags, comment and dish ratings; public restaurant and dish ratings; admin review search, summaries and featured dishes.</dd>
+  <dt>Calls</dt><dd>order-service (is the order the caller's and delivered), catalog-service (dish photos and categories).</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Chat service</b><span>chat-service · 8096 · chat_db · 64 / 10 / 4</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Support chat: one conversation per user, shared admin inbox with pin, mute and unread counts, retry-safe messages (client message id), 30 messages per minute limit.</dd>
+  <dt>Events</dt><dd>Publishes <code>ChatMessageSent</code>, <code>ChatMessagesRead</code> (ids only) for live delivery.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>Admin service</b><span>admin-service · 8092 · admin_db · 70 / 10 / 2</span></div><div class="svc-body"><dl>
+  <dt>Responsibility</dt><dd>Dashboard, reports (orders, revenue, restaurants, customers, deliveries) and calendar composed in parallel from the owning services, with partial answers when one is down; immutable platform-wide audit log (database triggers refuse updates and deletes).</dd>
+  <dt>Consumes</dt><dd><code>AdminActionAudited</code> from every service.</dd></dl></div></div>
+
+<div class="svc"><div class="svc-head"><b>AI assistant: client (BFF) and server</b><span>ai-mcp-client 8097 · 41 / 6 &nbsp;|&nbsp; ai-mcp-server 8098 · 86 / 22</span></div><div class="svc-body"><dl>
+  <dt>Client</dt><dd>Browser-facing API <code>/api/v1/assistant/*</code>: verifies that the user id and role belong together (user-service), keeps conversations in Redis, rate limits (20 questions per 10 minutes), forwards Confirm and Cancel.</dd>
+  <dt>Server</dt><dd>Spring AI agent with Ollama; 30 role-specific tools exposed over the Model Context Protocol; each tool calls one fixed existing API through the gateway as the user; prepared orders and changes stored in Redis until confirmed; audit log <code>ai.audit</code>; internal endpoints protected by a shared service token.</dd></dl></div></div>
+
+<!-- ================================================================ 6 -->
+<h1><span class="num">6</span>Service interactions</h1>
+
+<h2>6.1 Synchronous calls (REST, internal APIs)</h2>
+<p>Internal endpoints live under <code>/api/v1/internal/**</code> and are not routed by the gateway; they require the services' shared
+  <code>X-Service-Token</code>. Every call passes on the request id (calls made for an administrator carry the
+  administrator's own access token), and is guarded by timeouts, retry on connection failure, a circuit breaker and a
+  bulkhead.</p>
+<table>
+  <thead><tr><th style="width: 22%">Caller</th><th style="width: 34%">Calls</th><th>Why, and behaviour when the target is down</th></tr></thead>
+  <tbody>
+    <tr><td>order-service</td><td>user, restaurant, catalog, promotion</td><td>Checkout checks (customer, address, restaurant open, prices and stock) and coupon reservation. Down: checkout answers 503, nothing is half-saved; the cart still loads without the coupon check.</td></tr>
+    <tr><td>catalog-service</td><td>restaurant</td><td>Ownership of a restaurant not yet known from events. Down: owner changes answer 503.</td></tr>
+    <tr><td>restaurant-service</td><td>user</td><td>Owner details on the admin review screen. Down: owner shown as unavailable.</td></tr>
+    <tr><td>payment-service</td><td>order; Razorpay API</td><td>Amount of an order whose event has not arrived; payment provider calls.</td></tr>
+    <tr><td>delivery-service</td><td>order, restaurant, delivery-partner</td><td>Details missing from events. Down: the delivery waits for the next run.</td></tr>
+    <tr><td>notification-service</td><td>user, restaurant, order; SMTP</td><td>Current contact details at sending time. Down: retried later.</td></tr>
+    <tr><td>review-service</td><td>order, catalog</td><td>Order ownership and status; dish photos. Catalog down: page shown without photos.</td></tr>
+    <tr><td>chat-service</td><td>user, notification</td><td>Names; online presence (best effort).</td></tr>
+    <tr><td>admin-service</td><td>user, restaurant, catalog, order, payment, delivery, promotion</td><td>Dashboard and reports in parallel (5 s each); a failed source is listed as unavailable.</td></tr>
+    <tr><td>ai-mcp-client</td><td>user (public key), ai-mcp-server</td><td>Checks the access token; the agent. Down: 503 "assistant unavailable".</td></tr>
+    <tr><td>ai-mcp-server</td><td>API gateway, Ollama</td><td>Every tool calls the public API as the user, so the services' own access rules apply.</td></tr>
+  </tbody>
+</table>
+
+<h2>6.2 Asynchronous events (Kafka)</h2>
+<p>All topics are prefixed <code>fooddelivery.</code>, have 3 partitions, are keyed by entity id and have a
+  <code>.DLT</code> dead-letter topic per consumer. Schemas are in <code>event-contracts</code> version 1.7.0.</p>
+<table>
+  <thead><tr><th style="width: 40%">Topic</th><th style="width: 22%">Producer</th><th>Consumers</th></tr></thead>
+  <tbody>
+    <tr><td><code>user.registered</code></td><td>user</td><td>notification, delivery-partner</td></tr>
+    <tr><td><code>restaurant.changed</code></td><td>restaurant</td><td>catalog, notification, delivery, search</td></tr>
+    <tr><td><code>catalog.category-changed</code></td><td>catalog</td><td>search</td></tr>
+    <tr><td><code>catalog.menu-item-changed</code></td><td>catalog</td><td>search</td></tr>
+    <tr><td><code>order.created</code></td><td>order</td><td>payment, delivery, promotion</td></tr>
+    <tr><td><code>order.status-changed</code></td><td>order</td><td>notification, delivery, promotion</td></tr>
+    <tr><td><code>order.cancelled</code></td><td>order</td><td>payment, notification, delivery, promotion</td></tr>
+    <tr><td><code>order.payment-rejected</code></td><td>order</td><td>payment</td></tr>
+    <tr><td><code>payment.status-changed</code></td><td>payment</td><td>order, notification</td></tr>
+    <tr><td><code>delivery.status-changed</code></td><td>delivery</td><td>order, notification</td></tr>
+    <tr><td><code>delivery-partner.changed</code></td><td>delivery-partner</td><td>delivery</td></tr>
+    <tr><td><code>delivery.partner-status-changed</code></td><td>delivery</td><td>delivery-partner</td></tr>
+    <tr><td><code>admin.action-audited</code></td><td>every service with admin actions</td><td>admin</td></tr>
+    <tr><td><code>chat.message-sent</code></td><td>chat</td><td>notification (live hints)</td></tr>
+    <tr><td><code>chat.messages-read</code></td><td>chat</td><td>notification (live hints)</td></tr>
+  </tbody>
+</table>
+
+<figure class="figure">
+  <img src="outbox.svg" alt="Transactional outbox">
+  <figcaption>Figure 2. Every publishing service writes events to its <code>outbox_events</code> table in the same
+    transaction as the change; the relay publishes every 500 ms; consumers skip repeats via <code>processed_events</code>.</figcaption>
+</figure>
+
+<h2>6.3 Real-time channel</h2>
+<p>The notification service runs a second consumer group that turns order, payment, delivery, restaurant and chat events
+  into id-only hints (<code>ORDER_STATUS_CHANGED</code>, <code>DELIVERY_STATUS_CHANGED</code>, <code>CHAT_MESSAGE</code>
+  ...). Audience rules decide who receives each hint: administrators all events, customers their own orders, owners their
+  restaurants, partners their deliveries. The connection carries the user's access token, which the notification
+  service checks before accepting it. The browser reconnects automatically with back-off, re-reads data after a
+  reconnect and groups refreshes within 400 ms.</p>
+
+<!-- ================================================================ 7 -->
+<h1><span class="num">7</span>Key business workflows</h1>
+
+<h2>7.1 Order lifecycle</h2>
+<div class="flow">
+  <span class="st">PAYMENT_PENDING</span><i>→</i><span class="st">PLACED</span><i>→</i><span class="st">ACCEPTED</span><i>→</i>
+  <span class="st">PREPARING</span><i>→</i><span class="st">READY_FOR_PICKUP</span><i>→</i><span class="st">OUT_FOR_DELIVERY</span><i>→</i>
+  <span class="st end">DELIVERED</span>
+</div>
+<table>
+  <thead><tr><th style="width: 34%">Transition</th><th>Who or what causes it</th></tr></thead>
+  <tbody>
+    <tr><td><code>PAYMENT_PENDING</code> → <code>PLACED</code></td><td>Online payment succeeded (<code>PaymentStatusChanged</code>). Cash-on-delivery orders start as <code>PLACED</code>.</td></tr>
+    <tr><td><code>PLACED</code> → <code>ACCEPTED</code> / <code>REJECTED</code></td><td>The restaurant accepts or rejects the order.</td></tr>
+    <tr><td>→ <code>PREPARING</code> → <code>READY_FOR_PICKUP</code></td><td>The restaurant works through the order.</td></tr>
+    <tr><td>→ <code>OUT_FOR_DELIVERY</code> → <code>DELIVERED</code></td><td>The partner's pickup and delivery (<code>DeliveryStatusChanged</code>); a cash order becomes paid.</td></tr>
+    <tr><td>→ <code>CANCELLED</code></td><td>The customer before the restaurant accepts; an administrator for any unfinished order (audited); the system after 15 minutes unpaid.</td></tr>
+  </tbody>
+</table>
+<p>Online orders are invisible to the restaurant until paid.</p>
+
+<h2>7.2 Checkout and payment saga</h2>
+<ol class="steps">
+  <li><strong>Checkout.</strong> The customer posts the cart with an <code>Idempotency-Key</code>. order-service checks
+    the customer, address, restaurant (active and open) and every dish, reserves the coupon use, saves the order with
+    snapshots of names, prices and address, and writes <code>OrderCreated</code> to its outbox.</li>
+  <li><strong>Payment.</strong> payment-service keeps a copy of the order. With the simulated provider, the customer pays
+    directly; with Razorpay, the service creates a Razorpay order, the browser opens Razorpay Checkout, and the payment
+    becomes <code>SUCCESS</code> only after the HMAC signature is verified and Razorpay confirms the captured amount (or
+    the signed webhook arrives first).</li>
+  <li><strong>Placed.</strong> <code>PaymentStatusChanged(SUCCESS)</code> moves the order to <code>PLACED</code>; the
+    restaurant is notified and sees it on its board.</li>
+  <li><strong>Compensations.</strong> A cancelled or rejected paid order is refunded automatically; a payment completing
+    after cancellation is refunded (<code>OrderPaymentRejected</code>); an unpaid order is cancelled after 15 minutes; a
+    cancelled order releases its coupon use and cancels its delivery.</li>
+</ol>
+
+<h2>7.3 Kitchen to door</h2>
+<ol class="steps">
+  <li>The owner accepts the order, starts preparing and marks it ready; each step is published and notified.</li>
+  <li>On <code>READY_FOR_PICKUP</code>, delivery-service creates a pending delivery. The assignment job offers it to the
+    longest-waiting available partner in the restaurant's city.</li>
+  <li>The partner accepts within 2 minutes (otherwise the offer expires and the partner goes offline) or declines (never
+    offered that delivery again). An administrator can reassign a delivery to any available partner.</li>
+  <li>Pickup moves the order to <code>OUT_FOR_DELIVERY</code>; delivery (with cash collected for cash orders) moves it to
+    <code>DELIVERED</code>, marks a cash order paid, and makes the coupon use final.</li>
+  <li>The customer follows every step on the tracking page and can review the order once delivered.</li>
+</ol>
+
+<h2>7.4 Restaurant onboarding and menus</h2>
+<p>An owner registers, submits a restaurant with its food licence, and waits for review (<code>PENDING</code>). An
+  administrator approves or rejects it with a reason (the owner may resubmit), then activates it. Every status change is
+  e-mailed to the owner, copied into catalog, delivery and search by events, and audited. The owner then manages dishes,
+  prices and availability; administrators can block a dish the owner cannot unblock.</p>
+
+<h2>7.5 Delivery partner onboarding</h2>
+<p>A partner registers; <code>UserRegistered</code> creates their profile in delivery-partner-service. They add vehicle
+  and city and go online in delivery-service. Administrators can suspend a partner (not while on a delivery) and
+  reactivate them; suspensions reach dispatch through <code>DeliveryPartnerChanged</code>.</p>
+
+<h2>7.6 Search indexing</h2>
+<p>Restaurant, category and menu-item events update three Elasticsearch indexes within a second. Customers search by
+  text, city, cuisine, distance, category, food type and price, with autocomplete. Administrators can see index health,
+  run a consistency check against MySQL and repair differences.</p>
+
+<h2>7.7 Coupons</h2>
+<table>
+  <thead><tr><th style="width: 30%">Step</th><th>What happens</th><th style="width: 18%">Coupon use</th></tr></thead>
+  <tbody>
+    <tr><td>Customer applies a coupon</td><td>promotion-service validates it; the cart shows the reason when it does not qualify (422).</td><td>–</td></tr>
+    <tr><td>Checkout</td><td>One use is reserved; a row lock makes sure the last use goes to exactly one customer.</td><td><code>RESERVED</code></td></tr>
+    <tr><td><code>OrderCreated</code></td><td>The reservation is linked to the order.</td><td><code>APPLIED</code></td></tr>
+    <tr><td>Order delivered</td><td>The use becomes final.</td><td><code>REDEEMED</code></td></tr>
+    <tr><td><code>OrderCancelled</code></td><td>The use is given back; the customer may use the coupon again.</td><td><code>RELEASED</code></td></tr>
+    <tr><td>No order within 30 minutes</td><td>A clean-up job gives the use back.</td><td><code>EXPIRED</code></td></tr>
+  </tbody>
+</table>
+
+<h2>7.8 Administration and audit</h2>
+<p>Every administrator change (user role, restaurant approval, dish block, refund, delivery reassignment, partner
+  suspension, coupon change, notification resend) requires a reason, is saved with an audit record in the same
+  transaction, and is copied to the admin service as <code>AdminActionAudited</code>. The platform-wide audit log
+  searches across services by administrator, action, entity, request id, date and text.</p>
+
+<h2>7.9 Support chat</h2>
+<p>A customer, owner or partner writes to Support; the message is saved once (retry safe), and a live hint reaches every
+  connected administrator. Any administrator can answer; read receipts and unread counts are shared across administrators,
+  while pin and mute are personal.</p>
+
+<h2>7.10 AI assistant with confirmed actions</h2>
+<ol class="steps">
+  <li>The user opens the assistant (or speaks, if the browser supports speech recognition). ai-mcp-client checks the
+    user's access token (signature, expiry, issuer, audience) and forwards the question with that same token.</li>
+  <li>The agent answers using only the tools of that role; each tool calls the public API through the gateway as the user,
+    so existing permission and ownership checks apply. Results are shown as cards, tables and links, and can be read aloud.</li>
+  <li>For a change (for example "cancel my order 27", "mark order 31 ready", "I picked it up"), a tool only
+    <em>prepares</em> the action: it is stored in Redis (<code>act_&lt;uuid&gt;</code>, with an expiry) and shown as a
+    summary card with Confirm and Cancel.</li>
+  <li>Confirm checks again that the action belongs to the caller and their role, performs the fixed API call once (a
+    second press replays the result), and records the outcome in the <code>ai.audit</code> log.</li>
+</ol>
+
+<!-- ================================================================ 8 -->
+<h1><span class="num">8</span>Configuration</h1>
+
+<h2>8.1 Environment settings (<code>.env</code>)</h2>
+<p>Copy <code>.env.example</code> to <code>.env</code> and set real values; the file is git-ignored. Docker Compose and
+  <code>start-local.ps1</code> read it.</p>
+<table>
+  <thead><tr><th style="width: 30%">Group</th><th>Keys</th></tr></thead>
+  <tbody>
+    <tr><td>Database</td><td><code>MYSQL_PORT</code> (host port, 3330), <code>MYSQL_ROOT_PASSWORD</code>, one <code>*_DB_PASSWORD</code> per service database</td></tr>
+    <tr><td>First administrator</td><td><code>BOOTSTRAP_ADMIN_EMAIL</code>, <code>BOOTSTRAP_ADMIN_PASSWORD</code></td></tr>
+    <tr><td>Security</td><td><code>JWT_PRIVATE_KEY</code> (RSA key that signs the access tokens; development makes a temporary one when it is empty), <code>INTERNAL_SERVICE_TOKEN</code> (shared secret of the internal APIs)</td></tr>
+    <tr><td>Browser access</td><td><code>CORS_ALLOWED_ORIGINS</code></td></tr>
+    <tr><td>Payments</td><td><code>PAYMENT_PROVIDER</code> (<code>SIMULATED</code> default, or <code>RAZORPAY</code>), <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, <code>RAZORPAY_WEBHOOK_SECRET</code>, <code>RAZORPAY_MERCHANT_NAME</code></td></tr>
+    <tr><td>AI assistant</td><td><code>OLLAMA_MODEL</code>, <code>OLLAMA_KEEP_ALIVE</code>, <code>OLLAMA_MEMORY_LIMIT</code>, <code>AI_SERVICE_TOKEN</code> (shared secret of the two AI services)</td></tr>
+    <tr><td>Tools</td><td><code>GRAFANA_ADMIN_PASSWORD</code>, <code>SONARQUBE_DB_PASSWORD</code>, <code>SONARQUBE_ADMIN_PASSWORD</code>, <code>DEBEZIUM_DB_PASSWORD</code></td></tr>
+  </tbody>
+</table>
+
+<h2>8.2 Service and tool ports (development)</h2>
+<div class="grid-2">
+<table>
+  <thead><tr><th>Application</th><th class="num">Port</th></tr></thead>
+  <tbody>
+    <tr><td>Web application (Vite)</td><td class="num">5180</td></tr>
+    <tr><td>API gateway</td><td class="num">8080</td></tr>
+    <tr><td>user / restaurant / catalog</td><td class="num">8081 / 8082 / 8083</td></tr>
+    <tr><td>order / payment / notification</td><td class="num">8084 / 8085 / 8086</td></tr>
+    <tr><td>delivery / search / promotion</td><td class="num">8087 / 8088 / 8089</td></tr>
+    <tr><td>admin / review / chat</td><td class="num">8092 / 8094 / 8096</td></tr>
+    <tr><td>ai-mcp-client / ai-mcp-server</td><td class="num">8097 / 8098</td></tr>
+    <tr><td>delivery-partner</td><td class="num">8099</td></tr>
+  </tbody>
+</table>
+<table>
+  <thead><tr><th>Infrastructure and tools</th><th class="num">Port</th></tr></thead>
+  <tbody>
+    <tr><td>MySQL (host)</td><td class="num">3330</td></tr>
+    <tr><td>Kafka / Schema Registry</td><td class="num">9092 / 8091</td></tr>
+    <tr><td>Redis / Elasticsearch</td><td class="num">6379 / 9200</td></tr>
+    <tr><td>Mailpit (web / SMTP)</td><td class="num">8025 / 1025</td></tr>
+    <tr><td>phpMyAdmin / Kafka UI / Kibana</td><td class="num">8095 / 8090 / 5601</td></tr>
+    <tr><td>Grafana / Prometheus / Loki</td><td class="num">3000 / 9090 / 3100</td></tr>
+    <tr><td>Tempo / Jaeger / Alloy</td><td class="num">3200 / 16686 / 12345</td></tr>
+    <tr><td>SonarQube / Kafka Connect / Ollama</td><td class="num">9000 / 8093 / 11434</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>8.3 Docker Compose groups</h2>
+<table>
+  <thead><tr><th style="width: 28%">Group</th><th>Content and current state</th></tr></thead>
+  <tbody>
+    <tr><td>Default (<code>docker compose up -d</code>)</td><td>MySQL, Kafka, Schema Registry, Redis, Elasticsearch, Mailpit, phpMyAdmin, Ollama and its one-time model download.</td></tr>
+    <tr><td>Profile <code>quality</code></td><td>SonarQube and its PostgreSQL database.</td></tr>
+    <tr><td>Profile <code>cdc</code></td><td>Kafka Connect with Debezium (shadow mode evaluation).</td></tr>
+    <tr><td>Commented out, ready to restore</td><td>The 16 application containers (profiles <code>apps</code> and <code>ai</code>), the observability stack (Prometheus, Tempo, Jaeger, Loki, Alloy, Grafana, exporters), Kafka UI and Kibana. They were disabled to free memory on the development machine; uncommenting a block restores it.</td></tr>
+  </tbody>
+</table>
+
+<h2>8.4 Gateway traffic settings</h2>
+<table>
+  <thead><tr><th>Service</th><th class="num">Requests/s</th><th class="num">Burst</th><th class="num">Response timeout</th></tr></thead>
+  <tbody>
+    <tr><td>user, notification, promotion</td><td class="num">20</td><td class="num">40</td><td class="num">5 s</td></tr>
+    <tr><td>restaurant</td><td class="num">20</td><td class="num">40</td><td class="num">8 s</td></tr>
+    <tr><td>catalog</td><td class="num">40</td><td class="num">80</td><td class="num">8 s</td></tr>
+    <tr><td>search</td><td class="num">40</td><td class="num">80</td><td class="num">5 s</td></tr>
+    <tr><td>order, delivery</td><td class="num">20</td><td class="num">40</td><td class="num">9 s</td></tr>
+    <tr><td>payment</td><td class="num">10</td><td class="num">20</td><td class="num">8 s</td></tr>
+    <tr><td>admin</td><td class="num">10</td><td class="num">20</td><td class="num">9 s</td></tr>
+    <tr><td>sign-in and registration</td><td class="num" colspan="3">10 per minute per client (own budget)</td></tr>
+  </tbody>
+</table>
+<p>All routes: 2 s connect timeout, 2 GET retries on connection failure only, 10 s overall limit. Values can be overridden
+  with environment variables such as <code>APP_GATEWAY_SERVICES_ORDER_SERVICE_RESPONSE_TIMEOUT</code>.</p>
+
+<h2>8.5 Web application settings</h2>
+<table>
+  <thead><tr><th style="width: 38%">Key</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>VITE_APP_ENV</code></td><td>Environment name of the build (one file per mode: development, demo, uat, preprod, production)</td></tr>
+    <tr><td><code>VITE_API_BASE_URL</code></td><td>Address of the API gateway</td></tr>
+    <tr><td><code>VITE_FEATURE_LIVE_UPDATES</code></td><td>Live WebSocket updates on or off</td></tr>
+    <tr><td><code>VITE_FEATURE_API_LOGGING</code>, <code>VITE_FEATURE_QUERY_DEVTOOLS</code></td><td>Developer diagnostics</td></tr>
+    <tr><td><code>VITE_FEATURE_FAKE_LIVE_TRACKING</code></td><td>Demo only: a labelled simulated ride on the tracking map instead of the rider's GPS position (off by default)</td></tr>
+    <tr><td><code>VITE_MAP_TILE_URL</code>, <code>VITE_MAP_TILE_ATTRIBUTION</code></td><td>Map tiles (OpenStreetMap by default)</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 9 -->
+<h1><span class="num">9</span>Data management</h1>
+
+<h2>9.1 Schemas and migrations</h2>
+<p>Each service owns its schema, created and evolved by Flyway migrations in
+  <code>src/main/resources/db/migration</code> (77 in total), applied automatically at start-up. A new environment needs
+  only the empty databases and users, which <code>infrastructure/mysql/init</code> creates on the first MySQL start.</p>
+
+<h2>9.2 Common tables</h2>
+<table>
+  <thead><tr><th style="width: 26%">Table</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>outbox_events</code></td><td>Events waiting to be published (Avro bytes with their schema); kept 7 days after publishing for tracing.</td></tr>
+    <tr><td><code>processed_events</code></td><td>Ids of events already applied, written in the same transaction as their effect.</td></tr>
+    <tr><td><code>admin_audit_log</code></td><td>Immutable record of every administrator action in that service.</td></tr>
+    <tr><td>Local copies</td><td><code>restaurant_snapshots</code> (catalog), <code>payable_orders</code> (payment), <code>order_details</code> and <code>pickup_points</code> (delivery), partner copies in delivery and delivery-partner services.</td></tr>
+  </tbody>
+</table>
+
+<h2>9.3 Caching</h2>
+<p>Redis caches menus, categories and public restaurant pages using generation counters, so a change is visible on the
+  very next read. Prices and stock used at checkout are never cached. Redis runs without persistence; every service keeps
+  working (reading MySQL) when it is unavailable.</p>
+
+<h2>9.4 Resetting and re-seeding</h2>
+<ul>
+  <li>An empty MySQL volume gives empty databases; Flyway recreates every schema and the first administrator is created
+    from <code>BOOTSTRAP_ADMIN_EMAIL</code> and <code>BOOTSTRAP_ADMIN_PASSWORD</code>.</li>
+  <li>After a reset the search indexes are rebuilt with <code>POST /api/v1/admin/search/consistency/repair</code>.</li>
+  <li>Test data (owners, restaurants, partners, customers) is created through the public APIs, as the end-to-end tests do.</li>
+</ul>
+
+<!-- ================================================================ 10 -->
+<h1><span class="num">10</span>Security as implemented</h1>
+
+<table>
+  <thead><tr><th style="width: 28%">Control</th><th>Implementation</th></tr></thead>
+  <tbody>
+    <tr><td>Passwords</td><td>BCrypt hashes; password change requires the current password.</td></tr>
+    <tr><td>Roles and ownership</td><td>Four roles; every endpoint checks the role, and business logic checks ownership (owner's restaurants, partner's deliveries, customer's orders). Administrators cannot be registered; the first is bootstrapped from configuration.</td></tr>
+    <tr><td>Authentication (JWT)</td><td>The user service signs 15-minute RS256 access tokens (public key at <code>/.well-known/jwks.json</code>). The token is the only identity: the gateway and every service (Spring Security resource servers) check its signature, expiry, issuer and audience and take the user and role from it; the gateway removes any identity header a client sends. The WebSocket sends the token in its query, accepted there only.</td></tr>
+    <tr><td>Sessions</td><td>Rotating refresh tokens stored as SHA-256 hashes, sent as HttpOnly, SameSite=Strict cookies, one per area; reuse of a used refresh token ends the whole session; logout, deactivation, role and password changes end sessions. An access token already issued stays valid until it expires (at most 15 minutes).</td></tr>
+    <tr><td>Service to service</td><td>Internal APIs (<code>/api/v1/internal/**</code>) are never routed by the gateway and require the shared <code>INTERNAL_SERVICE_TOKEN</code> (<code>X-Service-Token</code>, compared in constant time); admin and search services call other services with the administrator's own token.</td></tr>
+    <tr><td>Location privacy</td><td>A rider's position is accepted only from that delivery's partner while on the way, kept as one row per delivery (no history), deleted when the delivery ends, shown only to that order's customer, and never logged.</td></tr>
+    <tr><td>Rate limiting</td><td>Per signed-in user (from the token), otherwise per client IP, and per service at the gateway; stricter budget for sign-in and registration; chat 30 messages per minute; assistant 20 questions per 10 minutes.</td></tr>
+    <tr><td>Payments</td><td>No card data stored (masked only); Razorpay signature verification plus server-side capture check; signed webhooks with duplicate detection; no automatic retry of charges; idempotency keys.</td></tr>
+    <tr><td>Audit</td><td>Immutable audit records with reason and request id; MySQL triggers block updates and deletes of the platform audit table; AI actions logged to <code>ai.audit</code>.</td></tr>
+    <tr><td>Error handling</td><td>RFC 9457 ProblemDetail with business-safe messages; no stack traces or SQL in responses; the AI client filters technical details from upstream errors.</td></tr>
+    <tr><td>AI safeguards</td><td>Identity from the verified access token only; tools per role; ids from the model are never trusted for identity; changes only through user-confirmed actions; internal AI endpoints protected by <code>AI_SERVICE_TOKEN</code>; Ollama bound to 127.0.0.1.</td></tr>
+    <tr><td>Containers</td><td>Multi-stage images running as a non-root user; secrets from environment, not images.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <div class="callout-title">Open security items</div>
+  <ul>
+    <li><strong>Service credentials:</strong> the internal APIs share one secret (<code>INTERNAL_SERVICE_TOKEN</code>);
+      consider mTLS or per-service credentials for a larger deployment.</li>
+    <li><strong>TLS and secrets:</strong> terminate HTTPS at the edge and move <code>.env</code> secrets into a secrets
+      manager per environment.</li>
+    <li><strong>Network isolation:</strong> keep internal endpoints (<code>/api/v1/internal/**</code>, actuator, the MCP
+      endpoint) reachable only inside the private network.</li>
+  </ul>
+</div>
+
+<!-- ================================================================ 11 -->
+<h1><span class="num">11</span>Resilience and observability</h1>
+
+<h2>11.1 Resilience (Resilience4j)</h2>
+<table>
+  <thead><tr><th style="width: 24%">Pattern</th><th>Setting</th></tr></thead>
+  <tbody>
+    <tr><td>Timeouts</td><td>2 s connect, 3 to 4 s read on every service-to-service client; Redis calls 300 ms.</td></tr>
+    <tr><td>Retry</td><td>One retry after 200 ms on connection failure only, for calls safe to repeat.</td></tr>
+    <tr><td>Circuit breaker</td><td>Per target: opens when half of the last 10 calls (at least 5) fail or 80% exceed 2.5 s; open for 10 s; 3 trial calls.</td></tr>
+    <tr><td>Bulkhead</td><td>At most 20 concurrent calls per target service.</td></tr>
+    <tr><td>Payment provider</td><td>Rate limiter of 20 charges per second; circuit breaker; never retried.</td></tr>
+    <tr><td>Kafka consumers</td><td>Two retries, then the dead-letter topic; invalid Avro goes to the dead-letter topic at once.</td></tr>
+  </tbody>
+</table>
+<p>State is visible on each service at <code>/actuator/circuitbreakers</code>, <code>/actuator/retries</code> and
+  <code>/actuator/bulkheads</code> (with an administrator's access token), and as Micrometer metrics.</p>
+
+<h2>11.2 Observability</h2>
+<ul>
+  <li><strong>Metrics:</strong> every service exposes <code>/actuator/prometheus</code>: HTTP, JVM, connection pools,
+    Kafka consumers, outbox backlog, circuit breakers and business counters.</li>
+  <li><strong>Traces:</strong> OpenTelemetry through Grafana Alloy to Tempo and Jaeger, across REST calls, Kafka events and
+    the outbox. <code>TRACING_SAMPLING_PROBABILITY</code> controls sampling (default 1.0; the Compose definitions set 0
+    while the observability stack is switched off).</li>
+  <li><strong>Logs:</strong> structured logs with trace id and request id, collected by Alloy into Loki.</li>
+  <li><strong>Dashboards:</strong> Grafana folder "Food Delivery" with technical and business dashboards, linking metrics
+    to traces and logs.</li>
+</ul>
+<div class="callout note">
+  <div class="callout-title">Current state</div>
+  <p>The observability stack is fully configured in <code>infrastructure/observability</code> but commented out in
+    <code>docker-compose.yml</code> to save memory on the development machine. Uncomment its block to run it again; the
+    services need no change.</p>
+</div>
+
+<!-- ================================================================ 12 -->
+<h1><span class="num">12</span>Testing and code quality</h1>
+
+<h2>12.1 Test inventory</h2>
+<table>
+  <thead><tr><th style="width: 30%">Level</th><th>Scope</th><th class="num" style="width: 16%">Count</th></tr></thead>
+  <tbody>
+    <tr><td>Back-end unit, slice and integration</td><td>Business rules, web layer (access, validation, errors), repositories and Kafka with Testcontainers (MySQL, Kafka, Redis, Elasticsearch)</td><td class="num">190 classes</td></tr>
+    <tr><td>Architecture rules</td><td>ArchUnit tests in each service (layers, DTO boundaries, injection style; AI tool and action isolation)</td><td class="num">in each service</td></tr>
+    <tr><td>End-to-end</td><td>Business flows against the running platform through the gateway</td><td class="num">8 suites</td></tr>
+    <tr><td>Front-end</td><td>Vitest and Testing Library: components, hooks, pages, utilities</td><td class="num">921 tests / 98 files</td></tr>
+  </tbody>
+</table>
+
+<h2>12.2 End-to-end suites</h2>
+<table>
+  <thead><tr><th style="width: 28%">Suite</th><th>Flow verified</th></tr></thead>
+  <tbody>
+    <tr><td>CheckoutToDelivery</td><td>Onboarding, menu, cart, checkout, payment, restaurant steps, dispatch, pickup, delivery, notifications.</td></tr>
+    <tr><td>DeliveryPartner</td><td>Partner registration, profile, availability, offers, decline and expiry, suspension.</td></tr>
+    <tr><td>CancellationAndRefund</td><td>Customer, restaurant and admin cancellations with automatic and manual refunds.</td></tr>
+    <tr><td>Coupon</td><td>Coupon validation, reservation, redemption and release.</td></tr>
+    <tr><td>Admin</td><td>Dashboard, reports, approvals and the platform-wide audit log.</td></tr>
+    <tr><td>Search</td><td>Indexing from events, search queries, suggestions and consistency repair.</td></tr>
+    <tr><td>Resilience</td><td>Behaviour of the gateway and services when a dependency is unavailable.</td></tr>
+    <tr><td>Observability</td><td>Metrics, request ids and trace propagation.</td></tr>
+  </tbody>
+</table>
+<p>Each suite creates its own owner, restaurant, customers and partner in a city of its own, so suites are independent of
+  existing data and of each other.</p>
+
+<h2>12.3 Quality gates</h2>
+<ul>
+  <li><strong>Checkstyle</strong> and <strong>SpotBugs</strong> with shared rules in <code>quality/</code>.</li>
+  <li><strong>JaCoCo</strong> minimum coverage per service; <strong>SonarQube</strong> quality gate (Compose profile
+    <code>quality</code>, scan script in <code>quality/</code>).</li>
+  <li>Front-end: TypeScript in strict mode, ESLint, Prettier and the Vitest suite, all run by <code>npm run verify</code>.</li>
+</ul>
+
+<h2>12.4 Running the tests</h2>
+<table class="tree">
+  <thead><tr><th style="width: 38%">Command (in the folder named)</th><th>What it runs</th></tr></thead>
+  <tbody>
+    <tr><td>&lt;service&gt;/ ./mvnw verify</td><td>Unit, slice and integration tests, architecture rules, Checkstyle, SpotBugs, coverage check</td></tr>
+    <tr><td>e2e-tests/ ./mvnw verify</td><td>End-to-end suites; the platform must be running (gateway on port 8080)</td></tr>
+    <tr><td>front-app/ npm run verify</td><td>Type check, lint, format check, tests and a production build</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 13 -->
+<h1><span class="num">13</span>Deployment and operations</h1>
+
+<h2>13.1 Current development run mode</h2>
+<p>To fit a single workstation, the infrastructure runs in Docker and every Spring Boot service runs as a local Java
+  process. <code>start-local.ps1</code> automates this:</p>
+<ol class="steps">
+  <li>Stops any leftover service containers that would hold the ports.</li>
+  <li>Starts the infrastructure with Docker Compose (MySQL, Kafka, Schema Registry, Redis, Elasticsearch, Mailpit, Ollama).</li>
+  <li>Installs the shared <code>event-contracts</code> library into the local Maven repository.</li>
+  <li>Builds each service's JAR if missing (<code>-Build</code> rebuilds all) and installs the web application's packages.</li>
+  <li>Opens one Windows Terminal window with a tab per service (JVM limited to 512 MB each), the web application, and a
+    status tab refreshing every service's health every 10 seconds (<code>-Status</code> shows only that tab).</li>
+</ol>
+
+<h2>13.2 Container deployment</h2>
+<ul>
+  <li>Every service has a multi-stage Dockerfile (Maven build stage; slim Java 21 runtime; layered JAR; non-root user).</li>
+  <li>The Compose definitions of all 16 applications are kept, commented out, in <code>docker-compose.yml</code> with
+    container-network addresses already set; uncommenting them restores the "everything in Docker" mode
+    (<code>docker compose --profile apps --profile ai up -d --build</code>).</li>
+  <li>Every service exposes <code>/actuator/health</code>, which orchestrator readiness and liveness probes can use.</li>
+  <li>The recommended production topology (managed Kubernetes, managed data services, secrets manager, CI/CD) is
+    described in the Project Proposal, section 14.</li>
+</ul>
+
+<h2>13.3 Operations runbook</h2>
+<table>
+  <thead><tr><th style="width: 32%">Situation</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td>A service shows "starting or down"</td><td>Check its terminal tab; most start-up failures are MySQL or Kafka not ready. Restart the tab once the infrastructure is healthy.</td></tr>
+    <tr><td>Events not arriving</td><td>Look for waiting rows: <code>SELECT * FROM outbox_events WHERE published_at IS NULL</code>; check the consumer's dead-letter topic.</td></tr>
+    <tr><td>Search results missing or stale</td><td><code>POST /api/v1/admin/search/consistency/repair</code> as an administrator.</td></tr>
+    <tr><td>A delivery never offered again</td><td>Partners who declined or let an offer expire are not offered that delivery again by design; an administrator reassigns it to an available partner.</td></tr>
+    <tr><td>Assistant offline or slow</td><td>Check Ollama (<code>http://localhost:11434/api/tags</code>); the first answer after a restart loads the model (about 2 minutes on a CPU).</td></tr>
+    <tr><td>Gateway answers 503 after a service container was recreated</td><td>Restart the gateway so it resolves the new address.</td></tr>
+    <tr><td>Docker runs out of memory</td><td>Keep the observability stack and data UIs off; run services locally; allow Docker more memory if available.</td></tr>
+    <tr><td>Razorpay payments</td><td>Set <code>PAYMENT_PROVIDER=RAZORPAY</code> and the three Razorpay keys in <code>.env</code>, restart payment-service; webhooks need a public HTTPS address (a tunnel in development).</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 14 -->
+<h1><span class="num">14</span>Completed features</h1>
+
+<div class="grid-2">
+  <div class="card">
+    <h4>Customer (<code>/customer</code>)</h4>
+    <ul>
+      <li>Sign in, registration, profile, addresses</li>
+      <li>Home, restaurants, categories, offers</li>
+      <li>Search with suggestions, filters and distance</li>
+      <li>Restaurant page, menu, ratings and reviews</li>
+      <li>Cart with coupons, checkout, idempotent ordering</li>
+      <li>Payment: card, UPI, wallet (simulated or Razorpay), cash on delivery</li>
+      <li>My orders, order details with timeline, cancellation</li>
+      <li>Live tracking page: status stepper, partner card, map with the rider's GPS position</li>
+      <li>Reviews of delivered orders with dish ratings</li>
+      <li>Notifications inbox, support chat, AI assistant with voice</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Restaurant owner (<code>/owner</code>)</h4>
+    <ul>
+      <li>Owner sign-in and registration</li>
+      <li>Restaurant submission, resubmission and profile</li>
+      <li>Dashboard with sales and popular dishes</li>
+      <li>Live order board: accept, reject, preparing, ready</li>
+      <li>Menu management: dishes, prices, sold out, hide/show</li>
+      <li>Reviews of the restaurant</li>
+      <li>Modern tab navigation with clear active state</li>
+      <li>Support chat and AI assistant</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Delivery partner (<code>/partner</code>)</h4>
+    <ul>
+      <li>Partner sign-in, registration and profile (vehicle, city)</li>
+      <li>Go online and offline</li>
+      <li>Delivery offers with a countdown: accept or decline</li>
+      <li>Current delivery: pickup and drop-off, picked up, delivered, cash collection</li>
+      <li>Delivery history with timeline</li>
+      <li>Support chat and AI assistant</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Platform administrator (<code>/admin</code>)</h4>
+    <ul>
+      <li>Dashboard, analytics with CSV export, calendar</li>
+      <li>Orders, customers, foods, categories, restaurants (approvals)</li>
+      <li>Coupons with usage; payments and refunds</li>
+      <li>Deliveries (delayed, reassign) and partners (suspend)</li>
+      <li>Reviews, notifications (resend), search index tools</li>
+      <li>Platform-wide audit log; support chat inbox</li>
+      <li>AI assistant with confirmed admin actions</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Cross-cutting features</h2>
+<ul>
+  <li>Light and dark themes; responsive layouts for phone, tablet and desktop; modern gradient toast messages.</li>
+  <li>Live updates on every area over one WebSocket connection with automatic reconnection.</li>
+  <li>E-mail, SMS (simulated), push and in-app notifications for every important event.</li>
+  <li>Consistent error messages and empty, loading and error states across pages.</li>
+</ul>
+
+<!-- ================================================================ 15 -->
+<h1><span class="num">15</span>Known limitations and recommendations</h1>
+
+<table>
+  <thead><tr><th style="width: 28%">Item</th><th>Current state</th><th style="width: 30%">Recommendation</th></tr></thead>
+  <tbody>
+    <tr><td>Authentication</td><td>Access tokens are checked at the gateway and in every service; an issued token stays valid up to 15 minutes after a sign-out or deactivation; one shared secret protects the internal APIs.</td><td>Keep service ports private, HTTPS at the edge; consider mTLS between services.</td></tr>
+    <tr><td>CI/CD</td><td>No pipeline in the repository; builds and tests run locally.</td><td>Add the pipeline proposed in the Project Proposal (build, gates, image, UAT, promotion).</td></tr>
+    <tr><td>Live rider position</td><td>The partner's web page sends the phone's position while it is open; mobile browsers pause it while the screen is off or the browser is in the background. The map has no route line or arrival time (no routing service).</td><td>A native rider app for background location; a routing service (self-hosted OSRM or Valhalla) for the road ahead and an arrival time; push positions over the WebSocket.</td></tr>
+    <tr><td>Razorpay webhooks</td><td>Integrated and tested in code; off by default.</td><td>Configure live keys and a public HTTPS webhook address per environment.</td></tr>
+    <tr><td>AI change requests</td><td>Recognised change requests (accept, reject with a reason, ready, sold out, partner steps, cancellations, reassignments) always end in a prepared action. Unusual wording that the server-side check does not recognise still depends on the 4B model.</td><td>A larger model or a GPU for more reliable tool calls on free-form requests.</td></tr>
+    <tr><td>AI response time</td><td>CPU-only model: 10 to 120 seconds per answer.</td><td>A GPU host or a managed model endpoint for production.</td></tr>
+    <tr><td>MCP tool listing</td><td>Tool calls are checked per role; the MCP endpoint lists every tool to the trusted client.</td><td>Filter the tool list per role as defence in depth.</td></tr>
+    <tr><td>Chat presence</td><td>Presence is per notification-service instance.</td><td>Use a shared store (Redis) when running several instances.</td></tr>
+    <tr><td>Address coordinates</td><td>Customers can pin an address with "Use my current location"; typed addresses without a pin have no coordinates.</td><td>Add geocoding or a map picker for typed addresses and "near me" search.</td></tr>
+    <tr><td>Development resources</td><td>The full stack exceeds a 16 GB workstation.</td><td>Keep the current split mode; use a shared development environment for full-stack tests.</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ 16 -->
+<h1><span class="num">16</span>Handover checklist and references</h1>
+
+<h2>16.1 Getting started (new developer)</h2>
+<ol class="steps">
+  <li>Install Java 21, Node.js (LTS), Docker Desktop and Windows Terminal.</li>
+  <li>Copy <code>.env.example</code> to <code>.env</code> and set passwords, the bootstrap administrator and (optionally) Razorpay keys.</li>
+  <li>Run <code>.\start-local.ps1</code>; wait until the status tab shows every service UP.</li>
+  <li>Open <code>http://localhost:5180/admin/sign-in</code> and sign in as the bootstrap administrator
+    (<code>BOOTSTRAP_ADMIN_EMAIL</code> / <code>BOOTSTRAP_ADMIN_PASSWORD</code>). Register an owner, a partner and a
+    customer in the same city to try a full order (README-LOCAL-TESTING.md).</li>
+  <li>Use each service's <code>.http</code> file, or a domain service's Swagger UI (<code>http://localhost:&lt;port&gt;/swagger-ui.html</code>), to explore the APIs.</li>
+</ol>
+
+<h2>16.2 Handover checklist</h2>
+<table>
+  <thead><tr><th>Item</th><th style="width: 18%">Status</th></tr></thead>
+  <tbody>
+    <tr><td>Source code of all services, shared library, web application and tests</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Docker Compose infrastructure and local start script</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Database migrations and initialisation scripts</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Event contracts (Avro schemas, topic names)</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Observability configuration and dashboards</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Quality rules and SonarQube set-up</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Technical reference (README), testing guide, decision records, AI assistant design</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>Project Proposal and Development Completion documents</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>JWT security (phase 18)</td><td><span class="status done">Delivered</span></td></tr>
+    <tr><td>CI/CD pipeline and production environment</td><td><span class="status todo">Open</span></td></tr>
+  </tbody>
+</table>
+
+<h2>16.3 Reference documents in the repository</h2>
+<table>
+  <thead><tr><th style="width: 40%">Document</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td><code>README.md</code></td><td>Complete technical reference: every API, lifecycle, design note, setting and runbook.</td></tr>
+    <tr><td><code>README-LOCAL-TESTING.md</code></td><td>Manual test guide: accounts, scenarios, Razorpay test mode.</td></tr>
+    <tr><td><code>docs/ai-assistant-architecture.md</code></td><td>AI assistant design, security model, tool-to-API map, limitations.</td></tr>
+    <tr><td><code>docs/decision-delivery-partner-service.md</code></td><td>Why partner profiles and dispatch are split.</td></tr>
+    <tr><td><code>docs/decision-debezium-cdc.md</code></td><td>Change data capture evaluation and decision.</td></tr>
+    <tr><td><code>docs/ratings-and-reviews.md</code></td><td>Public ratings, search sort and filter, pages that show them.</td></tr>
+    <tr><td><code>front-app/README.md</code></td><td>Web application set-up, scripts, environments and conventions.</td></tr>
+    <tr><td><code>quality/README.md</code></td><td>Quality gates and the SonarQube scan.</td></tr>
+    <tr><td><code>infrastructure/debezium/README.md</code></td><td>Running the optional CDC shadow mode.</td></tr>
+    <tr><td><code>&lt;service&gt;/*.http</code>, Swagger UI</td><td>Ready-made API requests and interactive API documentation per service.</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>

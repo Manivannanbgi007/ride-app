@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs findings that are not bugs in this code base (every other finding fails "mvnw verify").
+  Keep this list short: each entry says why.
+-->
+<FindBugsFilter
+        xmlns="https://github.com/spotbugs/filter/3.0.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd">
+
+    <!-- "May expose internal representation": Spring injects shared beans through constructors, and JPA entities,
+         records and DTOs hand out their collections by design. Copying them everywhere would add noise, not safety. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- "Constructor throws": a guard against finalizer attacks on security-sensitive classes. Records and value
+         objects here validate their arguments in the constructor on purpose (no finalizers are used anywhere). -->
+    <Match>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+
+    <!-- Classes generated from the Avro schemas (event-contracts, sub-packages of com.fooddelivery.events) -->
+    <Match>
+        <Package name="~com\.fooddelivery\.events\..+"/>
+    </Match>
+</FindBugsFilter>

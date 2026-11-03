@@ -1,0 +1,30 @@
+# Context tests (MOCKED): no Ollama (a scripted fake model replaces it), no Redis (an in-memory store replaces it),
+# the gateway is a local stub whose URL is set by the test (app.gateway.base-url).
+spring:
+  ai:
+    model:
+      chat: none
+    mcp:
+      server:
+        request-timeout: 20s
+
+app:
+  service-token: test-service-token
+  ollama:
+    # Nothing listens here: the status endpoint must report "not available" instead of failing
+    base-url: http://127.0.0.1:1
+    model: test-model
+    request-timeout: 5s
+    # Context tests must not call anything: the model is not warmed up
+    warm-up: false
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+# No OTLP exporter in tests (there is no Tempo)
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false

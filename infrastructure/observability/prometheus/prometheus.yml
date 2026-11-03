@@ -1,0 +1,52 @@
+# Prometheus: scrapes every service's /actuator/prometheus and the Elasticsearch and Redis exporters.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The Spring Boot services (Micrometer). Every metric also carries application="<service>".
+  - job_name: services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - api-gateway:8080
+          - user-service:8081
+          - restaurant-service:8082
+          - catalog-service:8083
+          - order-service:8084
+          - payment-service:8085
+          - notification-service:8086
+          - delivery-service:8087
+          - delivery-partner-service:8099
+          - search-service:8088
+          - promotion-service:8089
+          - review-service:8094
+          - chat-service:8096
+          - ai-mcp-client:8097
+          - ai-mcp-server:8098
+          - admin-service:8092
+    relabel_configs:
+      # instance="order-service" instead of "order-service:8084"
+      - source_labels: [__address__]
+        regex: "([^:]+):.*"
+        target_label: instance
+
+  # Elasticsearch cluster health (search-service's index store)
+  - job_name: elasticsearch
+    static_configs:
+      - targets: [elasticsearch-exporter:9114]
+
+  # Redis (cache and rate limits)
+  - job_name: redis
+    static_configs:
+      - targets: [redis-exporter:9121]
+
+  # Request rate, errors and latency per service and operation, computed by Jaeger from the traces
+  # (Jaeger's Monitor tab reads them back from here)
+  - job_name: jaeger-span-metrics
+    static_configs:
+      - targets: [jaeger:8889]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]

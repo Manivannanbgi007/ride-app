@@ -1,0 +1,165 @@
+server:
+  port: ${SERVER_PORT:8081}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies, so getRemoteAddr() is the real client IP.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: user-service
+  # Who is calling: the access token. This service signs the tokens, so it checks them with its own key
+  # (JwtKeyConfig, with app.jwt's issuer and audience). The "role" claim becomes the caller's role.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  profiles:
+    default: dev
+
+  # Local runs: read passwords from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:${MYSQL_PORT:3330}/user_db}
+    username: ${DB_USERNAME:user_svc}
+    password: ${DB_PASSWORD:${USER_DB_PASSWORD:}}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    locations: classpath:db/migration
+
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+  # Events (Avro) published to Kafka; the schemas live in Schema Registry.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Tracing: the trace context travels in the message headers, from the producer to every consumer
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8091}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      # Written to all in-sync replicas, and no duplicates when the producer retries.
+      acks: all
+      properties:
+        enable.idempotence: true
+        # Only the outbox relay sends (never a request thread): give up quickly and let the relay retry.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+
+app:
+  # Statistics count calendar days in this time zone
+  business-time-zone: Asia/Kolkata
+  kafka:
+    topics:
+      partitions: 3
+      replicas: ${KAFKA_TOPIC_REPLICAS:1}
+  # Transactional outbox (see OutboxProperties)
+  outbox:
+    relay-enabled: true
+    poll-interval: 500ms
+    batch-size: 100
+    send-timeout: 15s
+    max-backoff: 10s
+    retention: 7d
+  bootstrap-admin:
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    full-name: Platform Administrator
+  addresses:
+    max-per-user: 10
+  # Access tokens: short-lived JWTs signed with this service's RSA key (RS256). Every other service checks them with
+  # the public key from /.well-known/jwks.json, using the same issuer and audience values.
+  jwt:
+    issuer: ${JWT_ISSUER:https://auth.fooddelivery.local}
+    audience: ${JWT_AUDIENCE:food-delivery-api}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+    # base64 of a PKCS#8 RSA private key (2048+ bits). Generate once: see README.md, "Security (JWT)".
+    private-key: ${JWT_PRIVATE_KEY:}
+    # Without a key the service refuses to start; only the dev and test profiles may use a temporary key.
+    allow-ephemeral-key: false
+  # Sign-in sessions: refresh tokens in HttpOnly cookies, one per area of the web application
+  auth:
+    refresh-token:
+      ttl: ${AUTH_REFRESH_TOKEN_TTL:7d}
+      # Two tabs refreshing at the same moment is not a stolen token
+      reuse-grace: 10s
+      cleanup-cron: "0 30 3 * * *"
+    refresh-cookie:
+      secure: true
+      same-site: Strict
+      path: /api/v1/auth
+    # Web pages allowed to call login, refresh and logout (the same list as the gateway's CORS origins)
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5180}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  # Observability (Phase 14b): metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Auth/User Service
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user=, event=, order=, payment=, delivery=
+    # (empty ones are left out). Loki and Grafana read the trace id from here to link logs and traces.
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} event=%X{eventId} order=%X{orderId} payment=%X{paymentId} delivery=%X{deliveryId} ){'[a-zA-Z]+= ', ''}"
+
+# The shared secret of the internal APIs (/api/v1/internal/**): the other services send it as X-Service-Token.
+# Required (no default) outside the dev profile.
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN}

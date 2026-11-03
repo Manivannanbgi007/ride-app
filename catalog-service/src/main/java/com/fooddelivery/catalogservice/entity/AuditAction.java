@@ -1,0 +1,20 @@
+package com.fooddelivery.catalogservice.entity;
+
+public enum AuditAction {
+    CATEGORY_CREATED,
+    CATEGORY_UPDATED,
+    CATEGORY_ACTIVATED,
+    CATEGORY_DEACTIVATED,
+    CATEGORY_DELETED,
+    CATEGORIES_REORDERED,
+    MENU_ITEM_ACTIVATED_BY_ADMIN,
+    MENU_ITEM_BLOCKED_BY_ADMIN,
+    MENU_ITEM_CATEGORY_CHANGED_BY_ADMIN,
+    MENU_ITEM_REMOVED_BY_ADMIN,
+    MENU_ITEM_CREATED_BY_ADMIN,
+    MENU_ITEM_UPDATED_BY_ADMIN,
+    MENU_ITEM_DUPLICATED_BY_ADMIN,
+    /** All categories / menu items published again as events (for example to rebuild the search index). */
+    CATEGORY_EVENTS_REPUBLISHED,
+    MENU_ITEM_EVENTS_REPUBLISHED
+}

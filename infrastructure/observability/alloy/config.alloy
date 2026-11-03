@@ -1,0 +1,95 @@
+// Grafana Alloy: ships the logs of this Compose project's containers to Loki.
+// Every log line gets the labels service (Compose service name) and container; the Spring Boot services' lines also
+// get level, and their trace id, span id and request id as structured metadata (searchable, linked to Tempo).
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=food-delivery"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.spring.receiver]
+}
+
+loki.process "spring" {
+  // Only the Spring Boot services' lines have this shape:
+  // 2026-10-07T20:16:43.622Z  INFO 1 --- [order-service] [exec-1] [traceId,spanId] [requestId] user=7 ...
+  stage.match {
+    selector = "{service=~\".+-service|api-gateway\"}"
+
+    // A stack trace belongs to the line before it
+    stage.multiline {
+      firstline     = "^\\d{4}-\\d{2}-\\d{2}T"
+      max_wait_time = "3s"
+    }
+    stage.regex {
+      expression = "^\\S+\\s+(?P<level>[A-Z]+)\\s+\\d+ --- \\[[^\\]]*\\] \\[[^\\]]*\\] \\[(?P<trace_id>[0-9a-f]*),(?P<span_id>[0-9a-f]*)\\](?: \\[(?P<request_id>[^\\]]*)\\])?"
+    }
+    stage.labels {
+      values = { level = "" }
+    }
+    stage.structured_metadata {
+      values = { trace_id = "", span_id = "", request_id = "" }
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Traces: every service sends its spans (OTLP) to Alloy, which forwards a copy to Tempo (Grafana: traces linked to
+// logs and metrics) and one to Jaeger (search by duration, compare traces, latency per operation).
+// Services in Docker use http://alloy:4318; services started on this machine use http://localhost:4318.
+otelcol.receiver.otlp "services" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.traces.input]
+  }
+}
+
+otelcol.processor.batch "traces" {
+  output {
+    traces = [otelcol.exporter.otlphttp.tempo.input, otelcol.exporter.otlphttp.jaeger.input]
+  }
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    endpoint = "http://tempo:4318"
+  }
+}
+
+otelcol.exporter.otlphttp "jaeger" {
+  client {
+    endpoint = "http://jaeger:4318"
+  }
+}

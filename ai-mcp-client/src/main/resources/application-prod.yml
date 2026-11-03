@@ -1,0 +1,10 @@
+# Production: minimal actuator exposure. AI_SERVICE_TOKEN is required (no default: the service refuses to start without it).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+
+logging:
+  level:
+    root: INFO

@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "MenuItemChanged",
+  "namespace": "com.fooddelivery.events.catalog",
+  "doc": "A menu item was created, edited, enabled, disabled, blocked or removed. Carries the current state, so consumers can keep their own copy. Producer: catalog-service. Topic: fooddelivery.catalog.menu-item-changed (key: menuItemId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "changeType", "type": "string", "doc": "CREATED, UPDATED, PRICE_CHANGED, AVAILABILITY_CHANGED, STATUS_CHANGED, CATEGORY_CHANGED, REMOVED (deleted for good) or REPUBLISHED (replayed by an admin: nothing changed)" },
+    { "name": "menuItemId", "type": "long" },
+    { "name": "version", "type": "long", "doc": "Version of the menu item after the change: consumers ignore events older than the copy they have" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "categoryId", "type": "long" },
+    { "name": "name", "type": "string" },
+    { "name": "description", "type": ["null", "string"], "default": null },
+    { "name": "price", "type": { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 } },
+    { "name": "foodType", "type": "string", "doc": "VEG, NON_VEG or EGG (string: new types must not break consumers)" },
+    { "name": "imageUrl", "type": ["null", "string"], "default": null },
+    { "name": "available", "type": "boolean", "doc": "In stock today" },
+    { "name": "status", "type": "string", "doc": "ACTIVE (listed), DISABLED (hidden by the owner) or BLOCKED (hidden by an admin)" }
+  ]
+}

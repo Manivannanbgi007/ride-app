@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "ChatMessageSent",
+  "namespace": "com.fooddelivery.events.chat",
+  "doc": "A support chat message was saved. A hint, not the message itself: it carries ids only (the text stays in chat-service and is read over REST with the reader's own role). Producer: chat-service. Consumer: notification-service (live updates over WebSocket). Topic: fooddelivery.chat.message-sent (key: conversationId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "conversationId", "type": "long" },
+    { "name": "messageId", "type": "long" },
+    { "name": "participantUserId", "type": "long", "doc": "The customer, restaurant owner or delivery partner the conversation belongs to (the other side is the support team)" },
+    { "name": "senderUserId", "type": "long" },
+    { "name": "fromStaff", "type": "boolean", "doc": "True when a platform admin wrote it, false when the participant did" }
+  ]
+}

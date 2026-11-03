@@ -1,0 +1,15 @@
+# Tests: Testcontainers provides Redis; ai-mcp-server is replaced by a mock. The access tokens are signed by the
+# tests (TestJwts), whose local server publishes the public key (spring.security...jwk-set-uri is set by the tests).
+app:
+  agent-server:
+    service-token: test-token
+
+logging:
+  level:
+    com.fooddelivery: INFO
+
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false

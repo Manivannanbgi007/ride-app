@@ -1,0 +1,26 @@
+{
+  "dynamic": "strict",
+  "properties": {
+    "id": { "type": "long" },
+    "name": {
+      "type": "text", "analyzer": "folded",
+      "fields": {
+        "autocomplete": { "type": "text", "analyzer": "autocomplete", "search_analyzer": "folded" },
+        "sort": { "type": "keyword", "normalizer": "folded" }
+      }
+    },
+    "description": { "type": "text", "analyzer": "folded" },
+    "cuisines": {
+      "type": "keyword",
+      "fields": { "text": { "type": "text", "analyzer": "folded" } }
+    },
+    "city": { "type": "keyword" },
+    "addressLine": { "type": "keyword", "index": false },
+    "location": { "type": "geo_point" },
+    "status": { "type": "keyword" },
+    "ratingAverage": { "type": "double" },
+    "ratingCount": { "type": "integer" },
+    "sourceVersion": { "type": "long" },
+    "indexedAt": { "type": "date" }
+  }
+}

@@ -1,0 +1,13 @@
+# Dashboards are files in infrastructure/observability/grafana/dashboards (kept in Git). Changes made in the
+# Grafana UI are not saved back: export the JSON and replace the file.
+apiVersion: 1
+
+providers:
+  - name: food-delivery
+    folder: Food Delivery
+    type: file
+    allowUiUpdates: false
+    # Re-read the files every 30 s, so an edited dashboard file shows up without restarting Grafana
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

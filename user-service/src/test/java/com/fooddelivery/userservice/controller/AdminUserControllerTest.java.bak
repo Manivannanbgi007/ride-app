@@ -1,0 +1,125 @@
+package com.fooddelivery.userservice.controller;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.time.Instant;
+
+import com.fooddelivery.userservice.dto.response.AdminUserDetailsResponse;
+import com.fooddelivery.userservice.entity.Role;
+import com.fooddelivery.userservice.entity.UserStatus;
+import com.fooddelivery.userservice.exception.ConflictException;
+import com.fooddelivery.userservice.service.AdminUserService;
+import com.fooddelivery.userservice.service.UserStatsService;
+import com.fooddelivery.userservice.web.CallerInfo;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+/**
+ * Web layer only (no database): authorization headers, validation and error format.
+ */
+@WebMvcTest(AdminUserController.class)
+class AdminUserControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private AdminUserService adminUserService;
+
+    @MockitoBean
+    private UserStatsService userStatsService;
+
+    @Test
+    void callerWithoutRoleHeaderGets401() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Authentication required"));
+
+        verifyNoInteractions(adminUserService);
+    }
+
+    @Test
+    void nonAdminCallerGets403() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .header("X-User-Id", "5")
+                        .header("X-User-Role", "CUSTOMER"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("Only PLATFORM_ADMIN users can access admin APIs."));
+
+        verifyNoInteractions(adminUserService);
+    }
+
+    @Test
+    void deactivateWithoutReasonIsAValidationError() throws Exception {
+        mockMvc.perform(put("/api/v1/admin/users/5/deactivate")
+                        .header("X-User-Id", "100")
+                        .header("X-User-Role", "PLATFORM_ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.reason").exists());
+
+        verifyNoInteractions(adminUserService);
+    }
+
+    @Test
+    void deactivatePassesTheCallingAdminToTheService() throws Exception {
+        when(adminUserService.deactivateUser(eq(5L), eq("Fraud suspected"), any(CallerInfo.class)))
+                .thenReturn(details(5L, UserStatus.INACTIVE));
+
+        mockMvc.perform(put("/api/v1/admin/users/5/deactivate")
+                        .header("X-User-Id", "100")
+                        .header("X-User-Role", "PLATFORM_ADMIN")
+                        .header("X-Request-Id", "req-42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason": "Fraud suspected"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Request-Id", "req-42"))
+                .andExpect(jsonPath("$.status").value("INACTIVE"));
+
+        verify(adminUserService).deactivateUser(5L, "Fraud suspected",
+                new CallerInfo(100L, Role.PLATFORM_ADMIN, "127.0.0.1", "req-42"));
+    }
+
+    @Test
+    void businessConflictBecomes409WithRequestId() throws Exception {
+        when(adminUserService.activateUser(eq(5L), any(), any()))
+                .thenThrow(new ConflictException("User 5 is already active"));
+
+        mockMvc.perform(put("/api/v1/admin/users/5/activate")
+                        .header("X-User-Id", "100")
+                        .header("X-User-Role", "PLATFORM_ADMIN")
+                        .header("X-Request-Id", "req-43")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason": "Verified"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("User 5 is already active"))
+                .andExpect(jsonPath("$.requestId").value("req-43"));
+    }
+
+    private static AdminUserDetailsResponse details(Long id, UserStatus status) {
+        Instant now = Instant.parse("2026-10-07T10:00:00Z");
+        return new AdminUserDetailsResponse(id, "user@example.com", "User", null, Role.CUSTOMER, status,
+                now, now, null, 0);
+    }
+}

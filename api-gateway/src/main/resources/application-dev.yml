@@ -1,0 +1,5 @@
+# Local development. Spring's route-matching DEBUG log is not switched on: it prints whole request addresses, query
+# string included (where a WebSocket carries its access token). RequestIdFilter logs the route's path and status.
+logging:
+  level:
+    com.fooddelivery: DEBUG

@@ -1,0 +1,114 @@
+server:
+  port: ${SERVER_PORT:8094}
+  # Behind the API Gateway: trust X-Forwarded-* from internal proxies, so getRemoteAddr() is the real client IP.
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: review-service
+  # Who is calling: the access token signed by user-service. Its public key is read from user-service (once, then
+  # kept); the issuer and audience must be the platform's (user-service app.jwt). The "role" claim becomes the role.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${USER_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+          issuer-uri: ${JWT_ISSUER:https://auth.fooddelivery.local}
+          audiences: ${JWT_AUDIENCE:food-delivery-api}
+          authorities-claim-name: role
+          authority-prefix: ROLE_
+  profiles:
+    default: dev
+
+  # Local runs: read passwords from the project's .env file (git-ignored).
+  # In Docker the variables come from docker-compose instead, and these optional files are absent.
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:${MYSQL_PORT:3330}/review_db}
+    username: ${DB_USERNAME:review_svc}
+    password: ${DB_PASSWORD:${REVIEW_DB_PASSWORD:}}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    locations: classpath:db/migration
+
+  data:
+    web:
+      pageable:
+        default-page-size: 10
+        max-page-size: 50
+
+app:
+  # "from" and "to" filters are calendar days in this time zone
+  business-time-zone: Asia/Kolkata
+  # Services called over HTTP (internal APIs, not routed by the API Gateway); always with timeouts
+  order-service:
+    base-url: ${ORDER_SERVICE_URL:http://localhost:8084}
+    connect-timeout: 2s
+    read-timeout: 5s
+  catalog-service:
+    base-url: ${CATALOG_SERVICE_URL:http://localhost:8083}
+    connect-timeout: 2s
+    read-timeout: 5s
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  # Observability: metrics scraped by Prometheus, traces sent to Tempo
+  metrics:
+    tags:
+      # Every metric says which service it comes from
+      application: ${spring.application.name}
+    distribution:
+      # Response-time histograms, so Grafana can show percentiles (p95) over all instances
+      percentiles-histogram:
+        http.server.requests: true
+  tracing:
+    sampling:
+      # Every request is traced in development; lower it in production (e.g. 0.1)
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped by Prometheus, not pushed
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: ${spring.application.name}
+    description: Review Service
+
+logging:
+  pattern:
+    # Adds to every log line: [traceId,spanId] [requestId] and, when known, user= and order= (empty ones are left out).
+    # Loki and Grafana read the trace id from here to link logs and traces.
+    correlation: "[%X{traceId:-},%X{spanId:-}] [%X{requestId:-}] %replace(user=%X{userId} order=%X{orderId} ){'[a-zA-Z]+= ', ''}"
+
+# The shared secret of the internal APIs (/api/v1/internal/**): the other services send it as X-Service-Token.
+# Required (no default) outside the dev profile.
+app.security.internal-service-token: ${INTERNAL_SERVICE_TOKEN}

@@ -1,0 +1,127 @@
+package com.fooddelivery.searchservice.service;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import co.elastic.clients.elasticsearch._types.SortOptions;
+import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregate;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import com.fooddelivery.searchservice.dto.response.SearchResults.FacetValue;
+import com.fooddelivery.searchservice.exception.InvalidRequestException;
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregation;
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
+import org.springframework.data.elasticsearch.core.SearchHits;
+
+/** Building blocks shared by the searches (Elasticsearch query DSL). */
+final class SearchQueries {
+
+    /** Most values a facet lists. */
+    private static final int FACET_SIZE = 20;
+    private static final int MAX_RESULT_WINDOW = 10_000;
+    private static final String RATING_AVERAGE = "ratingAverage";
+
+    private SearchQueries() {
+    }
+
+    /**
+     * What customers type: whole words in the given fields, with typos tolerated (fuzziness AUTO: one wrong letter
+     * in words of 3-5 letters, two in longer ones), or word beginnings in the name ("biry" finds "Biryani").
+     */
+    static Query text(String text, List<String> fields) {
+        return Query.of(q -> q.bool(b -> b
+                .should(s -> s.multiMatch(m -> m.query(text).fields(fields).fuzziness("AUTO").prefixLength(1)))
+                .should(s -> s.match(m -> m.field("name.autocomplete").query(text).operator(Operator.And).boost(2.0f)))
+                .minimumShouldMatch("1")));
+    }
+
+    /** Word beginnings in the name only, every word must match: for autocomplete. */
+    static Query namePrefix(String text) {
+        return Query.of(q -> q.match(m -> m.field("name.autocomplete").query(text).operator(Operator.And)));
+    }
+
+    static Query exact(String field, String value) {
+        return Query.of(q -> q.term(t -> t.field(field).value(value)));
+    }
+
+    static Query exact(String field, long value) {
+        return Query.of(q -> q.term(t -> t.field(field).value(value)));
+    }
+
+    static Query exact(String field, boolean value) {
+        return Query.of(q -> q.term(t -> t.field(field).value(value)));
+    }
+
+    /** "bengaluru" finds "Bengaluru": keyword fields keep the original spelling, for facets. */
+    static Query exactIgnoringCase(String field, String value) {
+        return Query.of(q -> q.term(t -> t.field(field).value(value).caseInsensitive(true)));
+    }
+
+    /** Rated at least this high; documents without a rating have no value and never match. */
+    static Query minRating(double minimum) {
+        return Query.of(q -> q.range(r -> r.number(n -> n.field(RATING_AVERAGE).gte(minimum))));
+    }
+
+    /**
+     * Best rated first, then most ratings, then the given order (the search's normal order). Documents without a
+     * rating have no average: they come last, however the order goes on. Documents indexed before ratings existed have
+     * no count either, which counts as 0 so that they stay in the order of those that were never rated.
+     */
+    static List<SortOptions> ratingSort(SortOptions... thenBy) {
+        List<SortOptions> sort = new ArrayList<>();
+        sort.add(SortOptions.of(s -> s.field(f -> f.field(RATING_AVERAGE).order(SortOrder.Desc)
+                .missing(m -> m.stringValue("_last")))));
+        sort.add(SortOptions.of(s -> s.field(f -> f.field("ratingCount").order(SortOrder.Desc)
+                .missing(m -> m.longValue(0)))));
+        sort.addAll(List.of(thenBy));
+        // Same order on every page, whatever the ties
+        sort.add(SortOptions.of(s -> s.field(f -> f.field("id").order(SortOrder.Asc))));
+        return sort;
+    }
+
+    static Aggregation facet(String field) {
+        return Aggregation.of(a -> a.terms(t -> t.field(field).size(FACET_SIZE)));
+    }
+
+    /** The values of a facet requested with {@link #facet(String)}, most frequent first. */
+    static List<FacetValue> facetValues(SearchHits<?> hits, String name) {
+        if (!(hits.getAggregations() instanceof ElasticsearchAggregations aggregations)) {
+            return List.of();
+        }
+        ElasticsearchAggregation aggregation = aggregations.get(name);
+        if (aggregation == null) {
+            return List.of();
+        }
+        Aggregate aggregate = aggregation.aggregation().getAggregate();
+        if (!aggregate.isSterms()) {
+            return List.of();
+        }
+        return aggregate.sterms().buckets().array().stream()
+                .map(bucket -> new FacetValue(bucket.key().stringValue(), bucket.docCount()))
+                .toList();
+    }
+
+    static Map<String, List<FacetValue>> facets(SearchHits<?> hits, String... names) {
+        Map<String, List<FacetValue>> facets = new LinkedHashMap<>();
+        for (String name : names) {
+            facets.put(name, facetValues(hits, name));
+        }
+        return facets;
+    }
+
+    /** Elasticsearch pages through at most 10,000 results (index.max_result_window). */
+    static void checkPage(int page, int size) {
+        if ((long) (page + 1) * size > MAX_RESULT_WINDOW) {
+            throw new InvalidRequestException("Only the first " + MAX_RESULT_WINDOW
+                    + " results can be paged through: add words or filters to narrow the search");
+        }
+    }
+
+    static int totalPages(long totalHits, int size) {
+        return (int) ((totalHits + size - 1) / size);
+    }
+}

@@ -1,0 +1,81 @@
+package com.fooddelivery.searchservice.controller;
+
+import java.util.List;
+
+import com.fooddelivery.searchservice.dto.request.FoodSearchCriteria;
+import com.fooddelivery.searchservice.dto.request.RestaurantSearchCriteria;
+import com.fooddelivery.searchservice.dto.response.CategoryHit;
+import com.fooddelivery.searchservice.dto.response.FoodHit;
+import com.fooddelivery.searchservice.dto.response.RestaurantHit;
+import com.fooddelivery.searchservice.dto.response.SearchResults;
+import com.fooddelivery.searchservice.dto.response.Suggestions;
+import com.fooddelivery.searchservice.service.CategorySearchService;
+import com.fooddelivery.searchservice.service.FoodSearchService;
+import com.fooddelivery.searchservice.service.RestaurantSearchService;
+import com.fooddelivery.searchservice.service.SuggestionService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/** Public search: no login needed, like browsing menus. */
+@Tag(name = "Search", description = "Restaurant, dish and category search with typo tolerance, filters and autocomplete")
+@RestController
+@RequestMapping("/api/v1/search")
+@RequiredArgsConstructor
+public class SearchController {
+
+    private final RestaurantSearchService restaurantSearchService;
+    private final FoodSearchService foodSearchService;
+    private final CategorySearchService categorySearchService;
+    private final SuggestionService suggestionService;
+
+    @Operation(summary = "Search restaurants",
+            description = "By words (name, cuisines, description), city, cuisine; with lat/lon nearest first. "
+                    + "Every hit shows ratingAverage (null while unrated) and ratingCount. minRating keeps only "
+                    + "restaurants rated at least that high; sort=RATING lists the best rated first (then most "
+                    + "ratings), restaurants without ratings last. Facet: cuisines with counts.")
+    @GetMapping("/restaurants")
+    public SearchResults<RestaurantHit> searchRestaurants(
+            @Valid @ParameterObject RestaurantSearchCriteria criteria,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        return restaurantSearchService.search(criteria, page, size);
+    }
+
+    @Operation(summary = "Search dishes across all restaurants",
+            description = "Only dishes that can be ordered now. Every hit shows ratingAverage (null while unrated) and "
+                    + "ratingCount. minRating keeps only dishes rated at least that high; sort=RATING lists the best "
+                    + "rated first (then most ratings), dishes without ratings last. "
+                    + "Facets: foodTypes and categories with counts.")
+    @GetMapping("/foods")
+    public SearchResults<FoodHit> searchFoods(
+            @Valid @ParameterObject FoodSearchCriteria criteria,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        return foodSearchService.search(criteria, page, size);
+    }
+
+    @Operation(summary = "Search categories", description = "Without q: every active category in menu order")
+    @GetMapping("/categories")
+    public List<CategoryHit> searchCategories(@RequestParam(required = false) @Size(max = 100) String q) {
+        return categorySearchService.search(q);
+    }
+
+    @Operation(summary = "Autocomplete for the search box",
+            description = "Up to 5 restaurants, dishes and categories whose names start with what was typed")
+    @GetMapping("/suggest")
+    public Suggestions suggest(@RequestParam @NotBlank @Size(max = 50) String q,
+                               @RequestParam(required = false) @Size(max = 100) String city) {
+        return suggestionService.suggest(q, city);
+    }
+}

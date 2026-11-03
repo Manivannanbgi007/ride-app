@@ -1,0 +1,163 @@
+### Food Delivery Platform - Delivery Partner Service
+### Written for the VS Code "REST Client" extension (named requests pass ids between calls).
+###
+### delivery-partner-service owns the partners: registration (from UserRegistered, or on the partner's first call),
+### profile (vehicle and city) and the account status (an admin suspends or reactivates, audited).
+### delivery-service keeps what partners are doing: going online (PUT /me/availability), the assignment of
+### deliveries, /availability, /stats and a partner's deliveries. The API Gateway sends each path to its service, so
+### the web application uses the same URLs as before.
+###
+### Caller identity: the access token of a sign-in below (Authorization: Bearer); its role must be
+###   DELIVERY_PARTNER for /delivery/partners/me, PLATFORM_ADMIN for /admin/**
+
+@gateway = http://localhost:8080
+# The services' shared secret of the internal APIs: the dev profile's value (INTERNAL_SERVICE_TOKEN elsewhere)
+@internalServiceToken = dev-internal-service-token
+@service = http://localhost:8099
+
+@partnerEmail = sunil.rider@example.com
+@partnerPassword = Rider1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+
+@partnerId = {{partnerLogin.response.body.$.userId}}
+# Every call carries the access token of a sign-in above (valid 15 minutes: sign in again after that).
+@partnerToken = {{partnerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+
+
+### ============================ SETUP ============================
+
+### 1. Register a delivery partner (409 if it already exists: fine). UserRegistered creates the partner here.
+POST {{gateway}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{partnerEmail}}",
+  "password": "{{partnerPassword}}",
+  "fullName": "Sunil Rao",
+  "phone": "+919900445566",
+  "role": "DELIVERY_PARTNER"
+}
+
+### 2. Logins -> partnerId, adminToken
+# @name partnerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{partnerEmail}}", "password": "{{partnerPassword}}" }
+
+###
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+
+### ============================ PARTNER ============================
+
+### 3. My profile (OFFLINE, readyToWork false until vehicle and city are set)
+GET {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+
+### 4. Vehicle and city: published as DeliveryPartnerChanged (PROFILE_UPDATED), delivery-service keeps a copy
+PUT {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "vehicleType": "SCOOTER", "vehicleNumber": "ka05xy9999", "city": "Bengaluru" }
+
+### 5. Go online: delivery-service's API (it decides availability together with the deliveries)
+PUT {{gateway}}/api/v1/delivery/partners/me/availability
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "status": "AVAILABLE" }
+
+### 6. My profile again: status AVAILABLE, as delivery-service reported it (DeliveryPartnerStatusChanged)
+GET {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+
+### 7. Validation: an unknown vehicle type and a blank number -> 400 with the fields
+PUT {{gateway}}/api/v1/delivery/partners/me
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "vehicleType": "HOVERBOARD", "vehicleNumber": "", "city": "Bengaluru" }
+
+
+### ============================ ADMIN ============================
+
+### 8. Partners in a city, by status (OFFLINE, AVAILABLE, BUSY, SUSPENDED); q = part of the name or phone
+GET {{gateway}}/api/v1/admin/delivery-partners?city=Bengaluru&status=AVAILABLE&q=sunil
+Authorization: Bearer {{adminToken}}
+
+### 9. One partner
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}
+Authorization: Bearer {{adminToken}}
+
+### 10. Deactivate (suspend): 409 while the partner is on a delivery (reassign it first). delivery-service stops
+###     offering them deliveries (an offer not accepted yet goes back to the queue).
+PUT {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/deactivate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "Vehicle documents expired" }
+
+### 11. The partner cannot go online now: 409 (delivery-service)
+PUT {{gateway}}/api/v1/delivery/partners/me/availability
+Authorization: Bearer {{partnerToken}}
+Content-Type: application/json
+
+{ "status": "AVAILABLE" }
+
+### 12. Activate again (the partner starts OFFLINE and goes online themselves)
+PUT {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/activate
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "reason": "New documents checked" }
+
+### 13. The partner's audit trail (newest first; also in admin-service's platform-wide audit log)
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/audit-logs
+Authorization: Bearer {{adminToken}}
+
+### 14. Not this service: partners per status right now, and the partner's deliveries (delivery-service)
+GET {{gateway}}/api/v1/admin/delivery-partners/availability
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/api/v1/admin/delivery-partners/{{partnerId}}/deliveries
+Authorization: Bearer {{adminToken}}
+
+
+### ======================= INTERNAL (not through the gateway) =======================
+
+### 15. Once, on an installation from before this service existed: take over the partners delivery-service kept
+###     (profile, suspension, current status). Partners already here are left as they are, so repeating is safe.
+POST {{service}}/api/v1/internal/delivery-partners/import
+X-Service-Token: {{internalServiceToken}}
+
+### 16. What delivery-service asks when a partner's DeliveryPartnerChanged event has not reached it yet
+GET {{service}}/api/v1/internal/delivery-partners/{{partnerId}}
+X-Service-Token: {{internalServiceToken}}
+
+### 17. Send every audit record again to admin-service's platform-wide audit log (safe to repeat)
+POST {{service}}/api/v1/internal/audit-logs/events/republish
+X-Service-Token: {{internalServiceToken}}
+
+### 18. Through the gateway the internal API does not exist: 404
+GET {{gateway}}/api/v1/internal/delivery-partners/{{partnerId}}
+
+
+### ======================= EVENTS (Kafka) =======================
+### Publishes DeliveryPartnerChanged (REGISTERED, PROFILE_UPDATED, SUSPENDED, ACTIVATED; key = partnerUserId) and
+### AdminActionAudited through its transactional outbox.
+### Consumes UserRegistered (new partners) and DeliveryPartnerStatusChanged (what delivery-service reports).
+### Messages: Kafka UI http://localhost:8090
+
+GET http://localhost:8091/subjects/fooddelivery.delivery-partner.changed-value/versions/latest
+
+### Health and Swagger UI (http://localhost:8099/swagger-ui.html)
+GET {{service}}/actuator/health

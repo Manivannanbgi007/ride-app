@@ -1,0 +1,102 @@
+### Food Delivery Platform - AI MCP client (the chatbot's backend-for-frontend)
+### Written for the VS Code "REST Client" extension.
+###
+### The browser only talks to this service (through the API Gateway: /api/v1/assistant/**).
+### It takes who you are from your access token (signed by user-service, checked with its public key), keeps the
+### conversation in Redis, limits questions per user and calls ai-mcp-server (the LLM) with the same token.
+### Start user-service, Redis, ai-mcp-server (and Ollama) first.
+###
+### Caller identity: Authorization: Bearer <accessToken of step 1>. A token lives 15 minutes (run step 1 again), and the
+### assistant refuses one with less than 3 minutes left (401: an answer can take up to 150 s). X-User-* headers alone
+### are not accepted any more.
+
+@gateway = http://localhost:8080
+@service = http://localhost:8097
+@customerEmail = meera.iyer@example.com
+@customerPassword = Meera1234
+@adminEmail = admin@fooddelivery.local
+@adminPassword = ChangeMe123
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+
+
+### 1. Sign-ins -> access tokens
+# @name customerLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{customerEmail}}", "password": "{{customerPassword}}", "role": "CUSTOMER" }
+
+###
+# @name adminLogin
+POST {{gateway}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}", "role": "PLATFORM_ADMIN" }
+
+
+### ============================ CHATBOT ============================
+
+### 2. Is the assistant available? (never an error status)
+GET {{gateway}}/api/v1/assistant/status
+
+### 3. Starter questions for the role
+GET {{gateway}}/api/v1/assistant/suggestions
+Authorization: Bearer {{customerToken}}
+
+### 4. Ask a question (new conversation: conversationId null). A CPU model can take a minute.
+# @name chat
+POST {{gateway}}/api/v1/assistant/chat
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "conversationId": null, "message": "I want to order a biryani" }
+
+### 5. Continue the same conversation
+@conversationId = {{chat.response.body.$.conversationId}}
+
+POST {{gateway}}/api/v1/assistant/chat
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{ "conversationId": "{{conversationId}}", "message": "Show restaurants near my saved address" }
+
+### 6. Restore the conversation after a page reload (your own conversation only)
+GET {{gateway}}/api/v1/assistant/conversation?conversationId={{conversationId}}
+Authorization: Bearer {{customerToken}}
+
+### 7. "New chat"
+DELETE {{gateway}}/api/v1/assistant/conversation?conversationId={{conversationId}}
+Authorization: Bearer {{customerToken}}
+
+
+### ============================ ORDER BUTTONS ============================
+### When a reply has a pendingAction, the screen shows Confirm / Cancel. Set actionId from that reply.
+
+@actionId = replace-with-pendingAction-id
+
+### 8. Confirm (pressing it twice returns ALREADY_CREATED, never a second order)
+POST {{gateway}}/api/v1/assistant/actions/{{actionId}}/confirm
+Authorization: Bearer {{customerToken}}
+
+### 9. Cancel
+POST {{gateway}}/api/v1/assistant/actions/{{actionId}}/cancel
+Authorization: Bearer {{customerToken}}
+
+
+### ============================ CHECKS ============================
+
+### 10. Admin suggestions
+GET {{gateway}}/api/v1/assistant/suggestions
+Authorization: Bearer {{adminToken}}
+
+### 11. Identity headers without a token name nobody -> 401
+GET {{gateway}}/api/v1/assistant/suggestions
+X-User-Id: 1
+X-User-Role: PLATFORM_ADMIN
+
+### 12. No token -> 401 (WWW-Authenticate: Bearer)
+GET {{gateway}}/api/v1/assistant/suggestions
+
+### 13. Direct call, bypassing the gateway
+GET {{service}}/actuator/health

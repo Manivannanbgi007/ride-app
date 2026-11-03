@@ -1,0 +1,137 @@
+package com.fooddelivery.userservice.service;
+
+import java.util.Comparator;
+import java.util.List;
+
+import com.fooddelivery.userservice.config.AppProperties;
+import com.fooddelivery.userservice.dto.request.AddressRequest;
+import com.fooddelivery.userservice.dto.response.AddressResponse;
+import com.fooddelivery.userservice.dto.response.InternalAddressResponse;
+import com.fooddelivery.userservice.entity.Address;
+import com.fooddelivery.userservice.exception.AddressNotFoundException;
+import com.fooddelivery.userservice.exception.BusinessRuleException;
+import com.fooddelivery.userservice.mapper.AddressMapper;
+import com.fooddelivery.userservice.repository.AddressRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * A user's address book. Rules:
+ * <ul>
+ *   <li>a user who has addresses always has exactly one default address</li>
+ *   <li>the first address becomes the default automatically</li>
+ *   <li>deleting the default address promotes the most recent remaining one</li>
+ *   <li>at most {@code app.addresses.max-per-user} addresses per user</li>
+ * </ul>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AddressService {
+
+    private final AddressRepository addressRepository;
+    private final UserProfileService userProfileService;
+    private final AddressMapper addressMapper;
+    private final AppProperties appProperties;
+
+    @Transactional(readOnly = true)
+    public List<AddressResponse> getAddresses(Long userId) {
+        userProfileService.getActiveUser(userId);
+
+        return listAddresses(userId);
+    }
+
+    /**
+     * For admins: the same list as the user sees (default first), also for a deactivated user. The caller has
+     * already checked that the user exists.
+     */
+    @Transactional(readOnly = true)
+    public List<AddressResponse> listAddresses(Long userId) {
+        return addressRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .sorted(Comparator.comparing(Address::isDefaultAddress).reversed())
+                .map(addressMapper::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    public AddressResponse addAddress(Long userId, AddressRequest request) {
+        userProfileService.getActiveUser(userId);
+
+        List<Address> existingAddresses = addressRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        int maxAddresses = appProperties.addresses().maxPerUser();
+        if (existingAddresses.size() >= maxAddresses) {
+            throw new BusinessRuleException("A user can have at most " + maxAddresses + " addresses");
+        }
+
+        Address address = addressMapper.toEntity(userId, request);
+        if (existingAddresses.isEmpty() || Boolean.TRUE.equals(request.makeDefault())) {
+            existingAddresses.forEach(existing -> existing.setDefaultAddress(false));
+            address.setDefaultAddress(true);
+        }
+
+        Address savedAddress = addressRepository.save(address);
+        log.info("Address added. userId={} addressId={}", userId, savedAddress.getId());
+
+        return addressMapper.toResponse(savedAddress);
+    }
+
+    @Transactional
+    public AddressResponse updateAddress(Long userId, Long addressId, AddressRequest request) {
+        userProfileService.getActiveUser(userId);
+        Address address = findOwnedAddress(userId, addressId);
+
+        addressMapper.updateEntity(address, request);
+        // makeDefault=false on the current default is ignored: the user must always keep one default.
+        if (Boolean.TRUE.equals(request.makeDefault())) {
+            makeDefault(userId, address);
+        }
+
+        log.info("Address updated. userId={} addressId={}", userId, addressId);
+        return addressMapper.toResponse(addressRepository.saveAndFlush(address));
+    }
+
+    @Transactional
+    public AddressResponse setDefaultAddress(Long userId, Long addressId) {
+        userProfileService.getActiveUser(userId);
+        Address address = findOwnedAddress(userId, addressId);
+
+        makeDefault(userId, address);
+
+        return addressMapper.toResponse(addressRepository.saveAndFlush(address));
+    }
+
+    @Transactional
+    public void deleteAddress(Long userId, Long addressId) {
+        userProfileService.getActiveUser(userId);
+        Address address = findOwnedAddress(userId, addressId);
+
+        addressRepository.delete(address);
+
+        if (address.isDefaultAddress()) {
+            addressRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                    .filter(remaining -> !remaining.getId().equals(addressId))
+                    .findFirst()
+                    .ifPresent(newestRemaining -> newestRemaining.setDefaultAddress(true));
+        }
+        log.info("Address deleted. userId={} addressId={}", userId, addressId);
+    }
+
+    /** For other microservices: one address of a user (404 if it belongs to someone else). */
+    @Transactional(readOnly = true)
+    public InternalAddressResponse getInternalAddress(Long userId, Long addressId) {
+        return addressMapper.toInternalResponse(findOwnedAddress(userId, addressId));
+    }
+
+    private void makeDefault(Long userId, Address newDefault) {
+        addressRepository.findByUserIdOrderByCreatedAtDesc(userId)
+                .forEach(address -> address.setDefaultAddress(address.getId().equals(newDefault.getId())));
+    }
+
+    // Looking up by id AND owner means another user's address id simply returns 404.
+    private Address findOwnedAddress(Long userId, Long addressId) {
+        return addressRepository.findByIdAndUserId(addressId, userId)
+                .orElseThrow(() -> new AddressNotFoundException(addressId));
+    }
+}

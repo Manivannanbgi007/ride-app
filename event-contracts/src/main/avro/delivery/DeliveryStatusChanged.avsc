@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "DeliveryStatusChanged",
+  "namespace": "com.fooddelivery.events.delivery",
+  "doc": "A delivery entered a new status. order-service moves the order on (PICKED_UP: out for delivery, DELIVERED: delivered); notification-service tells the partner and the customer. Producer: delivery-service. Topic: fooddelivery.delivery.status-changed (key: orderId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "deliveryId", "type": "long" },
+    { "name": "orderId", "type": "long" },
+    { "name": "customerId", "type": "long" },
+    { "name": "restaurantId", "type": "long" },
+    { "name": "restaurantName", "type": ["null", "string"], "default": null },
+    { "name": "status", "type": "string", "doc": "PENDING (waiting for a partner), ASSIGNED, ACCEPTED, PICKED_UP, DELIVERED or CANCELLED (string: new statuses must not break consumers)" },
+    { "name": "previousStatus", "type": ["null", "string"], "default": null },
+    { "name": "partnerUserId", "type": ["null", "long"], "default": null, "doc": "The delivery partner (user id), when one is assigned" },
+    { "name": "partnerName", "type": ["null", "string"], "default": null },
+    { "name": "vehicleType", "type": ["null", "string"], "default": null },
+    { "name": "cashCollected", "type": ["null", { "type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2 }], "default": null, "doc": "Cash on delivery: the amount the partner collected (DELIVERED only)" },
+    { "name": "note", "type": ["null", "string"], "default": null }
+  ]
+}

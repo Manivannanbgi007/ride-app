@@ -1,0 +1,1 @@
+export { PagedResults } from './PagedResults';

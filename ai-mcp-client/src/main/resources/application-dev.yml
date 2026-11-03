@@ -1,0 +1,9 @@
+# Local development
+app:
+  agent-server:
+    # Must equal AI_SERVICE_TOKEN of ai-mcp-server (a dev-only value; production has no default)
+    service-token: ${AI_SERVICE_TOKEN:dev-ai-service-token}
+
+logging:
+  level:
+    com.fooddelivery: DEBUG

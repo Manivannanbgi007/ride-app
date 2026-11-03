@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "CategoryChanged",
+  "namespace": "com.fooddelivery.events.catalog",
+  "doc": "A food category was created, edited, activated, deactivated, moved or deleted. Carries the current state. Producer: catalog-service. Topic: fooddelivery.catalog.category-changed (key: categoryId).",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "Unique id of this event; consumers use it to ignore duplicates" },
+    { "name": "occurredAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "requestId", "type": ["null", "string"], "default": null, "doc": "X-Request-Id of the request that caused the event" },
+    { "name": "changeType", "type": "string", "doc": "CREATED, UPDATED, STATUS_CHANGED, REORDERED, DELETED (deleted for good) or REPUBLISHED (replayed by an admin: nothing changed)" },
+    { "name": "categoryId", "type": "long" },
+    { "name": "version", "type": "long", "doc": "Version of the category after the change: consumers ignore events older than the copy they have" },
+    { "name": "name", "type": "string" },
+    { "name": "description", "type": ["null", "string"], "default": null },
+    { "name": "imageUrl", "type": ["null", "string"], "default": null },
+    { "name": "displayOrder", "type": "int" },
+    { "name": "status", "type": "string", "doc": "ACTIVE or INACTIVE" }
+  ]
+}
