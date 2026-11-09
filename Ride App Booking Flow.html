@@ -1,0 +1,771 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Ride App Booking Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat+Brush&family=JetBrains+Mono:wght@500&family=Shantell+Sans:wght@400;600;700&display=swap">
+<style>
+:root {
+  /* Layout: a whiteboard swimlane sheet. Five vertical lanes (who acts) cross four bands (booking stage),
+     sketched with rough.js on grid paper; status tracks and a code map follow underneath. */
+  --paper: #f6f8fb;
+  --grid: #e3e9f1;
+  --card: #ffffff;
+  --ink: #1f2b3d;
+  --ink-soft: #566377;
+  --accent: #c2255c;
+  --lane-c: #fcc419;
+  --lane-o: #4dabf7;
+  --lane-k: #9775fa;
+  --lane-p: #40c057;
+  --lane-r: #ff8787;
+  --sticky: #fff0a3;
+  --sticky-edge: #c99a00;
+  --sticky-ink: #3a3212;
+  --tape: rgba(120, 146, 178, .35);
+  --fill-alpha: .72;
+  --head-alpha: .34;
+  --font-display: "Caveat Brush", "Segoe Print", "Comic Sans MS", cursive;
+  --font-hand: "Shantell Sans", "Segoe Print", "Comic Sans MS", cursive;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1b2527; --grid: #243134; --card: #222e31; --ink: #e8ede7; --ink-soft: #a2afab; --accent: #ff8fc8;
+    --lane-c: #f0cf62; --lane-o: #74bdf2; --lane-k: #b7a2f6; --lane-p: #78d487; --lane-r: #f39c9c;
+    --sticky: #4a4427; --sticky-edge: #b49839; --sticky-ink: #f5ebc6; --tape: rgba(200, 215, 225, .2);
+    --fill-alpha: .4; --head-alpha: .26;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1b2527; --grid: #243134; --card: #222e31; --ink: #e8ede7; --ink-soft: #a2afab; --accent: #ff8fc8;
+  --lane-c: #f0cf62; --lane-o: #74bdf2; --lane-k: #b7a2f6; --lane-p: #78d487; --lane-r: #f39c9c;
+  --sticky: #4a4427; --sticky-edge: #b49839; --sticky-ink: #f5ebc6; --tape: rgba(200, 215, 225, .2);
+  --fill-alpha: .4; --head-alpha: .26;
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--ink);
+  font-family: var(--font-hand);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.wrap {
+  max-width: 1340px;
+  margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 22px;
+}
+.wrap > * { min-width: 0; }
+
+/* Header */
+.top { display: grid; gap: 6px; }
+.eyebrow { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(42px, 6.4vw, 72px);
+  line-height: 1;
+  text-wrap: balance;
+}
+h1 .swash {
+  background: linear-gradient(transparent 56%, color-mix(in srgb, var(--lane-c) 72%, transparent) 56% 92%, transparent 92%);
+  padding: 0 .08em;
+}
+.lead { margin: 4px 0 0; max-width: 64ch; font-size: 16px; }
+
+/* Scenario picker */
+.controls { display: grid; gap: 8px; }
+.ctl-label { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 26px; line-height: 1.1; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-btn {
+  font: 600 14px/1 var(--font-hand);
+  color: var(--ink);
+  background: var(--card);
+  border: 2px solid var(--ink);
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: transform .15s ease;
+}
+.chip-btn:hover { transform: rotate(-1.2deg) translateY(-1px); }
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+.chip-btn:focus-visible { outline: 3px dashed var(--accent); outline-offset: 3px; }
+.caption { margin: 0; color: var(--ink-soft); min-height: 1.55em; max-width: 72ch; }
+
+/* Legend */
+.legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--ink) 35%, transparent);
+  border-radius: 12px;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.legend svg { width: 46px; height: 30px; flex: none; overflow: visible; }
+
+/* Board */
+.board-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-radius: 8px;
+}
+#board { display: block; width: 100%; min-width: 980px; height: auto; }
+.scroll-hint { margin: -12px 0 0; font-size: 13px; color: var(--ink-soft); }
+@media (min-width: 1012px) { .scroll-hint { display: none; } }
+
+/* Sketch layers (rough.js output is recoloured through these classes) */
+.sk .ink { stroke: var(--k, var(--ink)); }
+.sk .fill { stroke: var(--f); stroke-opacity: var(--fill-alpha); }
+.sk .fill-solid { fill: var(--f); }
+.sk .fill-paper { fill: var(--paper); }
+.sk .halo { stroke: var(--paper); stroke-width: 9px; fill: none; }
+.sk .guide .ink { stroke: var(--ink-soft); opacity: .5; }
+.sk .head .fill-solid { fill-opacity: var(--head-alpha); }
+.sk .note { --k: var(--sticky-edge); --f: var(--sticky); }
+.sk .tape { --f: var(--tape); }
+.sk .tape .ink { stroke: none; }
+.sk text { fill: var(--ink); font-family: var(--font-hand); }
+.sk .nt { font-size: 14px; }
+.sk .nt-dia { font-size: 14px; font-weight: 600; }
+.sk .note text { fill: var(--sticky-ink); font-size: 13.5px; }
+.sk .lbl { font-size: 12.5px; font-weight: 600; fill: var(--ink-soft); }
+.sk .lblbg { fill: var(--paper); opacity: .94; }
+.sk .lane-title { font-family: var(--font-display); font-size: 25px; }
+.sk .lane-sub { font-size: 11.5px; fill: var(--ink-soft); }
+.sk .phase-name { font-family: var(--font-display); font-size: 27px; }
+.sk .corner { font-size: 12px; font-weight: 600; fill: var(--ink-soft); }
+.sk .tagt { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; fill: var(--ink-soft); }
+.sk .check .ink { stroke: var(--lane-p); }
+
+.sk .node, .sk .edge { transition: opacity .25s ease; }
+.sk.tracing .node:not(.on), .sk.tracing .edge:not(.on) { opacity: .13; }
+.sk.tracing .edge.on .ink { stroke: var(--accent); stroke-width: 2.3px; }
+.sk.tracing .edge.on .lbl { fill: var(--accent); }
+
+/* Reference cards */
+.below { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 18px; }
+.card {
+  min-width: 0;
+  background: var(--card);
+  border: 2px solid var(--ink);
+  border-radius: 18px 6px 22px 8px / 8px 20px 6px 18px;
+  padding: 18px 20px 20px;
+  box-shadow: 4px 5px 0 color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.card h2 { margin: 0 0 2px; font-family: var(--font-display); font-weight: 400; font-size: 30px; line-height: 1.1; }
+.card .sub { margin: 0; color: var(--ink-soft); font-size: 14px; max-width: 62ch; }
+.track { list-style: none; margin: 14px 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 6px; }
+.st {
+  display: inline-block;
+  font: 500 12px/1.3 var(--font-mono);
+  padding: 5px 9px;
+  border: 1.6px solid var(--ink);
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  background: color-mix(in srgb, var(--f, var(--ink-soft)) 30%, var(--card));
+  color: var(--ink);
+}
+.st.later { border-style: dashed; background: transparent; color: var(--ink-soft); border-color: var(--ink-soft); }
+.arr { color: var(--ink-soft); font-weight: 700; }
+.exits { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; font-size: 14px; }
+.exits li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.note-line { margin: 12px 0 0; font-size: 13.5px; color: var(--ink-soft); }
+.code-card { grid-column: 1 / -1; }
+.table-scroll { overflow-x: auto; margin-top: 12px; }
+.code-card table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+.code-card th {
+  text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-soft); padding: 6px 14px 6px 0; border-bottom: 2px solid var(--ink);
+}
+.code-card td { padding: 9px 14px 9px 0; border-bottom: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent); vertical-align: top; }
+.code-card td:first-child { width: 30%; font-weight: 600; }
+.svc { font-weight: 700; margin-right: 4px; }
+code {
+  font: 500 12.5px var(--font-mono);
+  background: color-mix(in srgb, var(--lane-o) 16%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+details.text-flow { max-width: 78ch; }
+details.text-flow summary { cursor: pointer; font-weight: 700; font-size: 15px; }
+details.text-flow summary:focus-visible { outline: 3px dashed var(--accent); outline-offset: 3px; }
+details.text-flow ol { margin: 10px 0 0; padding-left: 22px; display: grid; gap: 8px; }
+.foot { margin: 0; font-size: 13px; color: var(--ink-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">ride-app · customer booking workflow</p>
+    <h1>Ride App <span class="swash">Booking</span> Flow</h1>
+    <p class="lead">How one order moves through the platform, from choosing dishes to a paid booking the restaurant has confirmed. Lanes show which part of the system acts; bands show the stage. Drawn from the services in this repo.</p>
+  </header>
+
+  <section class="controls" aria-labelledby="trace-label">
+    <h2 class="ctl-label" id="trace-label">Trace a path</h2>
+    <div class="chips" id="chips" role="group" aria-labelledby="trace-label"></div>
+    <p class="caption" id="caption" aria-live="polite"></p>
+  </section>
+
+  <div class="legend" id="legend" aria-label="Legend"></div>
+
+  <div class="board-scroll">
+    <svg id="board" class="sk" viewBox="0 0 1280 2480" role="img" aria-labelledby="board-title board-desc">
+      <title id="board-title">Ride app booking workflow, hand-drawn swimlane diagram</title>
+      <desc id="board-desc">Five lanes (customer, order service, supporting services, payment service, restaurant) across four stages: choose items, check out, pay, confirm. A text version follows the diagram.</desc>
+    </svg>
+  </div>
+  <p class="scroll-hint">Scroll sideways to see every lane.</p>
+
+  <details class="text-flow">
+    <summary>Read the flow as text</summary>
+    <ol>
+      <li><strong>Choose items.</strong> The customer browses or searches (search service), opens a restaurant menu and adds dishes. Catalog confirms each dish is on the menu and available. Cart rules: one restaurant at a time, up to 20 of a dish, up to 50 lines. The cart is priced with fresh prices, the coupon (re-checked by promotion), ₹40 delivery (free from ₹499) and 5% tax.</li>
+      <li><strong>Check out.</strong> The customer picks an address, a payment method and notes, then places the order with an idempotency key, so a retry never creates a second order. Order service checks the restaurant is open, every dish can still be ordered, the account is active and the address belongs to the customer. If anything fails, the customer sees why. Otherwise it reserves the coupon, saves the order with frozen prices, empties the cart and publishes OrderCreated. Cash on delivery goes straight to PLACED; online payment waits as PAYMENT_PENDING on the Payment page.</li>
+      <li><strong>Pay.</strong> Payment service checks the order is the caller's and still unpaid, takes the amount from the order (never from the browser) and charges through the simulated gateway or Razorpay. If the payment is declined, the order stays unpaid, the customer gets a push and can try again or cancel. If it is approved, SUCCESS is saved with a PaymentStatusChanged event. If the order is still unpaid it becomes PAID and PLACED; if the 15-minute timer already cancelled it, the payment is refunded automatically.</li>
+      <li><strong>Confirm.</strong> PLACED sends the customer an email and push, and the restaurant a push. If the restaurant accepts, the order is ACCEPTED, the customer gets "Order accepted" and can track it live. If it rejects, the order is cancelled with a reason and any payment is refunded. The customer may cancel while the order is unpaid or PLACED.</li>
+    </ol>
+  </details>
+
+  <div class="below">
+    <section class="card" aria-labelledby="os-title">
+      <h2 id="os-title">Order status</h2>
+      <p class="sub">Set only by order-service, and only along these moves.</p>
+      <ol class="track" aria-label="Order status sequence">
+        <li><span class="st" style="--f: var(--lane-o)">PAYMENT_PENDING</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st" style="--f: var(--lane-o)">PLACED</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st" style="--f: var(--lane-r)">ACCEPTED</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st later">PREPARING</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st later">READY_FOR_PICKUP</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st later">OUT_FOR_DELIVERY</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st later">DELIVERED</span></li>
+      </ol>
+      <ul class="exits">
+        <li><span class="st" style="--f: var(--ink-soft)">CANCELLED</span><span>by the customer while PAYMENT_PENDING or PLACED, by the 15-minute timer while PAYMENT_PENDING, or by an admin until pickup</span></li>
+        <li><span class="st" style="--f: var(--lane-r)">REJECTED</span><span>by the restaurant while PLACED</span></li>
+      </ul>
+      <p class="note-line">Cash on delivery orders skip PAYMENT_PENDING and start as PLACED. Dashed statuses come after the booking is confirmed (kitchen and delivery).</p>
+    </section>
+
+    <section class="card" aria-labelledby="ps-title">
+      <h2 id="ps-title">Payment status</h2>
+      <p class="sub">Owned by payment-service. order-service keeps its own copy: PENDING, PAID, FAILED or REFUNDED.</p>
+      <ol class="track" aria-label="Payment status sequence">
+        <li><span class="st" style="--f: var(--lane-p)">INITIATED</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st" style="--f: var(--lane-p)">PROCESSING</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st" style="--f: var(--lane-p)">SUCCESS</span></li>
+        <li class="arr" aria-hidden="true">→</li>
+        <li><span class="st" style="--f: var(--ink-soft)">REFUNDED</span></li>
+      </ol>
+      <ul class="exits">
+        <li><span class="st" style="--f: var(--lane-r)">FAILED</span><span>from INITIATED or PROCESSING; the customer can start a new attempt</span></li>
+      </ul>
+      <p class="note-line">With Razorpay, a failed try keeps the payment PROCESSING so the customer retries on the same Razorpay order. A partial refund keeps SUCCESS and records the refunded amount.</p>
+    </section>
+
+    <section class="card code-card" aria-labelledby="code-title">
+      <h2 id="code-title">Where it lives in the code</h2>
+      <p class="sub">Paths are relative to each service's <code>src/main/java/com/fooddelivery/&lt;service&gt;/</code> folder.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Step</th><th scope="col">Code</th></tr></thead>
+          <tbody>
+            <tr><td>Menu, cart, checkout and payment screens</td><td><span class="svc">front-app</span><code>src/pages/Storefront/</code> RestaurantMenuPage, CartPage, CheckoutPage, PaymentPage</td></tr>
+            <tr><td>Cart rules and pricing</td><td><span class="svc">order-service</span><code>service/CartService.java</code>, <code>service/OrderPricingCalculator.java</code></td></tr>
+            <tr><td>Place the order</td><td><span class="svc">order-service</span><code>service/OrderPlacementService.java</code></td></tr>
+            <tr><td>Allowed status moves</td><td><span class="svc">order-service</span><code>entity/OrderStatus.java</code>, <code>service/OrderStatusTransitions.java</code></td></tr>
+            <tr><td>Charge the payment</td><td><span class="svc">payment-service</span><code>service/PaymentService.java</code> (simulated), <code>service/RazorpayPaymentService.java</code>, <code>service/RazorpayWebhookService.java</code></td></tr>
+            <tr><td>Apply the payment result</td><td><span class="svc">order-service</span><code>service/OrderPaymentService.java</code></td></tr>
+            <tr><td>15-minute unpaid timeout</td><td><span class="svc">order-service</span><code>service/UnpaidOrderExpiryService.java</code> (setting <code>ORDER_PAYMENT_TIMEOUT</code>, default 15m)</td></tr>
+            <tr><td>Refunds after a cancel or a late payment</td><td><span class="svc">payment-service</span><code>service/OrderEventService.java</code>, <code>service/RefundService.java</code></td></tr>
+            <tr><td>Restaurant accepts or rejects</td><td><span class="svc">order-service</span><code>service/RestaurantOrderService.java</code></td></tr>
+            <tr><td>Notifications</td><td><span class="svc">notification-service</span><code>service/EventNotificationService.java</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">Drawn from the master branch at commit 2153656. Fees, limits and timeouts are the defaults in order-service's application.yml.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var INK = '#010101', FILL = '#020202', PAPER = '#030303';
+  var hasRough = !!(window.rough && window.rough.svg);
+
+  function el(name, attrs) {
+    var n = document.createElementNS(NS, name);
+    if (attrs) Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    return n;
+  }
+
+  /* Plain-SVG stand-in, used only if the sketch library cannot load. */
+  function mk(d, o, open) {
+    var g = el('g');
+    if (o.fill && !open) g.appendChild(el('path', { d: d, fill: o.fill, stroke: 'none', 'fill-opacity': o.fill === FILL ? '.35' : '1' }));
+    var p = el('path', { d: d, fill: 'none', stroke: o.stroke || INK, 'stroke-width': o.strokeWidth || 1.5 });
+    if (o.strokeLineDash) p.setAttribute('stroke-dasharray', o.strokeLineDash.join(' '));
+    g.appendChild(p);
+    return g;
+  }
+  var plain = {
+    rectangle: function (x, y, w, h, o) { return mk('M' + x + ' ' + y + 'h' + w + 'v' + h + 'h' + (-w) + 'Z', o); },
+    polygon: function (pts, o) { return mk('M' + pts.map(function (p) { return p.join(' '); }).join('L') + 'Z', o); },
+    path: function (d, o) { return mk(d, o); },
+    linearPath: function (pts, o) { return mk('M' + pts.map(function (p) { return p.join(' '); }).join('L'), o, true); },
+    line: function (x1, y1, x2, y2, o) { return mk('M' + x1 + ' ' + y1 + 'L' + x2 + ' ' + y2, o, true); },
+    circle: function (x, y, dm, o) { var r = dm / 2; return mk('M' + (x - r) + ' ' + y + 'a' + r + ' ' + r + ' 0 1 0 ' + dm + ' 0a' + r + ' ' + r + ' 0 1 0 ' + (-dm) + ' 0', o); }
+  };
+  function gen(svg) { return hasRough ? window.rough.svg(svg) : plain; }
+
+  var seed = 11;
+  function O(o) {
+    var base = { seed: seed++, roughness: 1.1, bowing: 0.8, stroke: INK, strokeWidth: 1.5 };
+    if (o) Object.keys(o).forEach(function (k) { base[k] = o[k]; });
+    return base;
+  }
+  /* Tag rough's paths so CSS tokens can colour them (theme-aware). */
+  function tag(g) {
+    g.querySelectorAll('path').forEach(function (p) {
+      var s = p.getAttribute('stroke'), f = p.getAttribute('fill');
+      if (s === INK) p.classList.add('ink');
+      else if (s === FILL) p.classList.add('fill');
+      if (f === FILL) p.classList.add('fill-solid');
+      else if (f === PAPER) p.classList.add('fill-paper');
+    });
+    return g;
+  }
+  function pill(x, y, w, h) {
+    var r = h / 2;
+    return 'M' + (x + r) + ' ' + y + ' L' + (x + w - r) + ' ' + y + ' A' + r + ' ' + r + ' 0 0 1 ' + (x + w - r) + ' ' + (y + h) +
+      ' L' + (x + r) + ' ' + (y + h) + ' A' + r + ' ' + r + ' 0 0 1 ' + (x + r) + ' ' + y + ' Z';
+  }
+  function txt(parent, x, y, s, cls, anchor, lh) {
+    var lines = String(s).split('\n');
+    lh = lh || 18;
+    var t = el('text', { 'class': cls, 'text-anchor': anchor || 'middle' });
+    var y0 = y - (lines.length - 1) * lh / 2;
+    lines.forEach(function (line, i) {
+      var sp = el('tspan', { x: x, y: y0 + i * lh, dy: '.35em' });
+      sp.textContent = line;
+      t.appendChild(sp);
+    });
+    parent.appendChild(t);
+    return t;
+  }
+  var HATCH = { fill: FILL, fillStyle: 'hachure', hachureGap: 6.5, fillWeight: 1.3, hachureAngle: -41 };
+  function merge(a, b) { var o = {}; Object.keys(a).forEach(function (k) { o[k] = a[k]; }); Object.keys(b).forEach(function (k) { o[k] = b[k]; }); return o; }
+
+  /* ---------------- Board geometry ---------------- */
+  var svg = document.getElementById('board');
+  var rc = gen(svg);
+  var W = 1280, H = 2480, PHX = 64, LW = 240;
+  var LANES = [
+    { id: 'C', title: 'Customer', sub: ['web app (front-app)'], tag: 'CUSTOMER' },
+    { id: 'O', title: 'Order service', sub: ['cart, checkout,', 'order status'], tag: 'ORDER' },
+    { id: 'K', title: 'Supporting services', sub: ['search · catalog · restaurant', 'user · promotion'], tag: 'SUPPORTING' },
+    { id: 'P', title: 'Payment service', sub: ['simulated gateway', 'or Razorpay'], tag: 'PAYMENT' },
+    { id: 'R', title: 'Restaurant', sub: ["owner's order screen"], tag: 'RESTAURANT' }
+  ];
+  var LI = { C: 0, O: 1, K: 2, P: 3, R: 4 };
+  function laneX(id) { return PHX + LI[id] * LW; }
+  function cx(id) { return laneX(id) + LW / 2; }
+  var PHASES = [
+    { n: 1, name: 'Choose items', y0: 80, y1: 650 },
+    { n: 2, name: 'Check out', y0: 650, y1: 1310 },
+    { n: 3, name: 'Pay', y0: 1310, y1: 1950 },
+    { n: 4, name: 'Confirm', y0: 1950, y1: 2470 }
+  ];
+
+  var NODES = [
+    { id: 'a1', lane: 'C', y: 124, t: 'pill', text: 'Customer opens\nthe app' },
+    { id: 'a2', lane: 'C', y: 222, text: 'Browse categories,\nrestaurants & offers,\nor search' },
+    { id: 's1', lane: 'K', y: 222, text: 'Search finds\nrestaurants & dishes\n(Elasticsearch)' },
+    { id: 'a3', lane: 'C', y: 328, text: 'Open a menu, pick\ndishes & quantity' },
+    { id: 'a4', lane: 'O', y: 328, text: 'Cart: add the dish\nor change quantity' },
+    { id: 'a5', lane: 'K', y: 328, text: 'Catalog: is the dish\non the menu and\navailable now?' },
+    { id: 'st_rules', lane: 'P', y: 328, t: 'note', rot: -1.6, text: 'Cart rules: one\nrestaurant at a time,\nmax 20 of a dish,\nmax 50 lines' },
+    { id: 'a6', lane: 'O', y: 450, t: 'dia', text: 'Cart rules\nOK?' },
+    { id: 'a7', lane: 'C', y: 450, text: "Shown the reason,\ne.g. 'clear the cart\nfirst'" },
+    { id: 'a8', lane: 'O', y: 580, text: 'Price the cart: fresh\nprices, coupon,\ndelivery fee, tax' },
+    { id: 'a8k', lane: 'K', y: 580, text: 'Promotion re-checks\nthe coupon, if any' },
+    { id: 'a9', lane: 'C', y: 580, text: 'Review cart & total,\nadd a coupon' },
+    { id: 'st_price', lane: 'P', y: 580, t: 'note', rot: 1.3, text: 'Delivery ₹40, free\nfrom ₹499 of dishes;\ntax is 5%' },
+
+    { id: 'b1', lane: 'C', y: 732, text: 'Checkout: address,\npayment method (UPI,\ncard, wallet, cash)' },
+    { id: 'b2', lane: 'C', y: 846, text: "Tap 'Place order'\n(one idempotency key\nper attempt)" },
+    { id: 'b3', lane: 'O', y: 846, text: 'Validate the\ncheckout' },
+    { id: 'b3k', lane: 'K', y: 846, text: 'Restaurant open?\nDishes orderable?\nAccount active?\nAddress is yours?' },
+    { id: 'b4', lane: 'K', y: 982, t: 'dia', text: 'All checks\npass?' },
+    { id: 'b4x', lane: 'C', y: 982, text: "Shown what blocks it,\ne.g. 'restaurant is\nclosed right now'" },
+    { id: 'b6', lane: 'O', y: 1100, text: 'Reserve coupon, save\norder (prices frozen),\nempty the cart' },
+    { id: 'b6p', lane: 'P', y: 1114, text: 'Payment keeps a copy\nof the order\n(OrderCreated event)' },
+    { id: 'b7', lane: 'O', y: 1230, t: 'dia', text: 'Paying\nonline?' },
+    { id: 'b8', lane: 'C', y: 1230, text: 'Sent to the Payment\npage; order waits as\nPAYMENT_PENDING' },
+
+    { id: 'c1', lane: 'C', y: 1384, text: 'Pay by UPI, card or\nwallet within 15 min' },
+    { id: 'c2', lane: 'P', y: 1384, text: 'Your order? Still\nunpaid? Amount taken\nfrom the order' },
+    { id: 't1', lane: 'O', y: 1502, t: 'timer', text: 'Every 60 s: cancel\norders unpaid for\n15 minutes' },
+    { id: 'c3', lane: 'P', y: 1502, text: 'Gateway charges:\nsimulated, or Razorpay\n(signature checked,\nmoney captured)' },
+    { id: 'st_hook', lane: 'R', y: 1502, t: 'note', rot: -1.1, text: "Razorpay's webhook\nfinishes the payment\nif the browser closed" },
+    { id: 'c4', lane: 'P', y: 1640, t: 'dia', text: 'Payment\napproved?' },
+    { id: 'c5', lane: 'C', y: 1640, text: 'Push: payment failed.\nOrder stays unpaid:\ntry again or cancel' },
+    { id: 'c6', lane: 'P', y: 1770, text: 'SUCCESS saved with a\nPaymentStatusChanged\nevent (outbox → Kafka)' },
+    { id: 'c7', lane: 'O', y: 1770, t: 'dia', text: 'Order still\nunpaid?' },
+    { id: 'c9', lane: 'C', y: 1770, t: 'pill', w: 208, text: 'Order already\ncancelled: payment\nrefunded automatically' },
+    { id: 'c8', lane: 'O', y: 1890, text: 'Mark PAID; order\nmoves to PLACED' },
+
+    { id: 'd1', lane: 'O', y: 2030, t: 'mile', text: 'Order PLACED\n(OrderStatusChanged)' },
+    { id: 'd1n', lane: 'C', y: 2030, t: 'note', rot: 1.4, text: "Customer gets 'Order\nplaced' by email\nand push" },
+    { id: 'd2', lane: 'R', y: 2030, text: "Restaurant gets a\n'New order' push\n(never sees unpaid)" },
+    { id: 'd3', lane: 'R', y: 2160, t: 'dia', text: 'Restaurant\naccepts?' },
+    { id: 'd4', lane: 'P', y: 2160, text: 'Rejected with reason:\norder cancelled, paid\nmoney refunded' },
+    { id: 'st_cancel', lane: 'K', y: 2160, t: 'note', rot: -1.2, text: 'Customer may cancel\nwhile unpaid or PLACED\n(before the kitchen\naccepts)' },
+    { id: 'd4e', lane: 'P', y: 2290, t: 'pill', text: 'Customer told why\n(order REJECTED)' },
+    { id: 'd5', lane: 'R', y: 2290, text: 'ACCEPTED: the\nkitchen confirms' },
+    { id: 'end', lane: 'C', y: 2410, t: 'pill', w: 220, strong: true, text: 'Booking confirmed:\ntrack it live' }
+  ];
+  var N = {};
+  NODES.forEach(function (n) { N[n.id] = n; });
+
+  /* [id, from.port, to.port, options]  ports: t b l r, optional +/- offset along that side */
+  var EDGES = [
+    ['cod', 'b7.r', 'd1.r-12', { via: [[536, 1230], [536, 2018]], label: 'cash on delivery:\nstraight to PLACED', lp: [548, 1262, 'start'] }],
+    ['e33', 't1.b', 'c7.t', { dash: true, label: 'may cancel\nit first', lp: [432, 1584, 'start'] }],
+    ['e1', 'a1.b', 'a2.t'],
+    ['e2', 'a2.r', 's1.l', { both: true, label: 'search' }],
+    ['e3', 'a2.b', 'a3.t'],
+    ['e4', 'a3.r', 'a4.l', { label: 'add' }],
+    ['e5', 'a4.r', 'a5.l', { label: 'check' }],
+    ['e6', 'a5.b', 'a6.r', { label: 'answer', lp: [672, 410, 'start'] }],
+    ['e7', 'a6.l', 'a7.r', { label: 'no' }],
+    ['e8', 'a7.t', 'a3.b', { label: 'fix & retry' }],
+    ['e9', 'a6.b', 'a8.t', { label: 'yes' }],
+    ['e10', 'a8.r', 'a8k.l', { both: true, label: 'coupon' }],
+    ['e11', 'a8.l', 'a9.r'],
+    ['e12', 'a9.b', 'b1.t'],
+    ['e13', 'b1.b', 'b2.t'],
+    ['e14', 'b2.r', 'b3.l', { label: 'place' }],
+    ['e15', 'b3.r', 'b3k.l', { label: 'check' }],
+    ['e16', 'b3k.b', 'b4.t'],
+    ['e17', 'b4.l', 'b4x.r', { label: 'no', lp: [556, 970] }],
+    ['e18', 'b4x.t', 'b2.b', { label: 'fix & retry' }],
+    ['e19', 'b4.b', 'b6.r-12', { label: 'yes', lp: [672, 1058, 'start'] }],
+    ['e20', 'b6.r+14', 'b6p.l', { dash: true, label: 'OrderCreated', lp: [742, 1102] }],
+    ['e21', 'b6.b', 'b7.t'],
+    ['e22', 'b7.l', 'b8.r', { label: 'yes' }],
+    ['e24', 'b8.b', 'c1.t'],
+    ['e25', 'b6p.b', 'c2.t', { dash: true, label: 'uses the copy' }],
+    ['e26', 'c1.r', 'c2.l', { label: 'pay', lp: [420, 1372] }],
+    ['e27', 'c2.b', 'c3.t'],
+    ['e28', 'c3.b', 'c4.t'],
+    ['e29', 'c4.l', 'c5.r', { label: 'no', lp: [790, 1628] }],
+    ['e30', 'c5.t', 'c1.b', { label: 'try again' }],
+    ['e31', 'c4.b', 'c6.t', { label: 'yes' }],
+    ['e32', 'c6.l', 'c7.r', { dash: true, label: 'event', lp: [690, 1758] }],
+    ['e34', 'c7.l', 'c9.r', { label: 'no' }],
+    ['e35', 'c7.b', 'c8.t', { label: 'yes' }],
+    ['e36', 'c8.b', 'd1.t'],
+    ['e37', 'd1.l', 'd1n.r', { dash: true, label: 'notify' }],
+    ['e38', 'd1.r+12', 'd2.l+12', { dash: true, label: 'via notification service' }],
+    ['e39', 'd2.b', 'd3.t'],
+    ['e40', 'd3.l', 'd4.r', { label: 'no' }],
+    ['e41', 'd4.b', 'd4e.t'],
+    ['e42', 'd3.b', 'd5.t', { label: 'yes' }],
+    ['e43', 'd5.b', 'end.r', { label: "push: 'Order accepted'", lp: [720, 2398] }],
+    ['e44', 'st_hook.l', 'c3.r', { dash: true, noArrow: true }]
+  ];
+
+  var layers = { guides: el('g'), edges: el('g'), nodes: el('g') };
+  svg.appendChild(layers.guides);
+  svg.appendChild(layers.edges);
+  svg.appendChild(layers.nodes);
+  var fitList = [], labelList = [];
+
+  /* ---------------- Guides: lanes, headers, stages ---------------- */
+  for (var i = 0; i <= 5; i++) {
+    var gx = PHX + i * LW;
+    var lg = tag(rc.line(gx, 8, gx, H - 8, O({ roughness: 0.7, strokeWidth: 1, strokeLineDash: [3, 7] })));
+    lg.classList.add('guide');
+    layers.guides.appendChild(lg);
+  }
+  txt(layers.guides, 32, 28, 'who →', 'corner');
+  txt(layers.guides, 32, 50, 'when ↓', 'corner');
+
+  LANES.forEach(function (ln) {
+    var x = laneX(ln.id);
+    var g = el('g', { 'class': 'head' });
+    g.style.setProperty('--f', 'var(--lane-' + ln.id.toLowerCase() + ')');
+    g.appendChild(tag(rc.rectangle(x + 10, 8, LW - 20, 62, O({ fill: FILL, fillStyle: 'solid', roughness: 1.3 }))));
+    txt(g, x + LW / 2, ln.sub.length > 1 ? 27 : 31, ln.title, 'lane-title');
+    ln.sub.forEach(function (s, j) { txt(g, x + LW / 2, (ln.sub.length > 1 ? 47 : 53) + j * 14, s, 'lane-sub'); });
+    layers.guides.appendChild(g);
+  });
+
+  PHASES.forEach(function (ph, idx) {
+    var mid = (ph.y0 + ph.y1) / 2;
+    var g = el('g', { 'class': 'phase' });
+    var t = txt(g, 0, 0, ph.n + ' · ' + ph.name, 'phase-name');
+    t.setAttribute('transform', 'translate(29 ' + mid + ') rotate(-90)');
+    var br = tag(rc.linearPath([[58, ph.y0 + 16], [51, ph.y0 + 16], [51, ph.y1 - 16], [58, ph.y1 - 16]], O({ strokeWidth: 1.3, roughness: 0.9 })));
+    g.appendChild(br);
+    if (idx < PHASES.length - 1) {
+      var sep = tag(rc.line(PHX, ph.y1, W - 16, ph.y1, O({ roughness: 0.8, strokeWidth: 1.2, strokeLineDash: [10, 8] })));
+      sep.classList.add('guide');
+      g.appendChild(sep);
+    }
+    if (idx > 0) LANES.forEach(function (ln) { txt(g, laneX(ln.id) + 12, ph.y0 + 20, ln.tag, 'tagt', 'start'); });
+    layers.guides.appendChild(g);
+  });
+
+  /* ---------------- Nodes ---------------- */
+  function drawNode(n) {
+    var x = cx(n.lane), y = n.y, lines = n.text.split('\n').length;
+    var g = el('g', { 'class': 'node' + (n.t === 'note' ? ' note' : ''), 'data-id': n.id });
+    if (n.t !== 'note') g.style.setProperty('--f', 'var(--lane-' + n.lane.toLowerCase() + ')');
+    var w = n.w || 192, h;
+    switch (n.t) {
+      case 'dia':
+        w = 176; h = 108;
+        g.appendChild(tag(rc.polygon([[x, y - h / 2], [x + w / 2, y], [x, y + h / 2], [x - w / 2, y]], O(HATCH))));
+        break;
+      case 'pill':
+        h = lines * 18 + 26;
+        g.appendChild(tag(rc.path(pill(x - w / 2, y - h / 2, w, h), O(merge(HATCH, { fillStyle: 'cross-hatch', hachureGap: 9, strokeWidth: n.strong ? 2.6 : 1.6 })))));
+        break;
+      case 'mile':
+        w = 176; h = lines * 18 + 28;
+        g.appendChild(tag(rc.rectangle(x - w / 2, y - h / 2, w, h, O(merge(HATCH, { strokeWidth: 2 })))));
+        g.appendChild(tag(rc.rectangle(x - w / 2 - 6, y - h / 2 - 6, w + 12, h + 12, O({ roughness: 0.9, strokeWidth: 1.1 }))));
+        break;
+      case 'timer':
+        h = lines * 18 + 28;
+        g.appendChild(tag(rc.rectangle(x - w / 2, y - h / 2, w, h, O(HATCH))));
+        var kx = x - w / 2 + 6, ky = y - h / 2 + 6;
+        g.appendChild(tag(rc.circle(kx, ky, 28, O({ fill: PAPER, fillStyle: 'solid', strokeWidth: 1.6, roughness: 0.8 }))));
+        g.appendChild(tag(rc.linearPath([[kx, ky - 9], [kx, ky], [kx + 7, ky + 4]], O({ strokeWidth: 1.6, roughness: 0.4 }))));
+        break;
+      case 'note':
+        h = lines * 18 + 24;
+        g.appendChild(tag(rc.rectangle(x - w / 2, y - h / 2, w, h, O({ fill: FILL, fillStyle: 'solid', roughness: 1.4, strokeWidth: 1.2 }))));
+        var tp = el('g', { 'class': 'tape' });
+        tp.appendChild(tag(rc.rectangle(x - 24, y - h / 2 - 8, 48, 15, O({ fill: FILL, fillStyle: 'solid', roughness: 0.6 }))));
+        g.appendChild(tp);
+        break;
+      default:
+        h = lines * 18 + 28;
+        g.appendChild(tag(rc.rectangle(x - w / 2, y - h / 2, w, h, O(HATCH))));
+    }
+    n.w = w; n.h = h;
+    var t = txt(g, x, y, n.text, n.t === 'dia' ? 'nt nt-dia' : 'nt');
+    fitList.push([t, n.t === 'dia' ? w * 0.6 : (n.t === 'pill' ? w - h * 0.55 : w - 18)]);
+    if (n.strong) {
+      var ck = el('g', { 'class': 'check' });
+      ck.appendChild(tag(rc.linearPath([[x - w / 2 + 22, y + 1], [x - w / 2 + 29, y + 9], [x - w / 2 + 42, y - 9]], O({ strokeWidth: 3, roughness: 0.6 }))));
+      g.appendChild(ck);
+    }
+    if (n.t === 'note' && n.rot) g.setAttribute('transform', 'rotate(' + n.rot + ' ' + x + ' ' + y + ')');
+    layers.nodes.appendChild(g);
+  }
+  NODES.forEach(drawNode);
+
+  /* ---------------- Edges ---------------- */
+  function parseEnd(s) {
+    var m = /^(\w+)\.([tblr])([+-]\d+)?$/.exec(s);
+    return { id: m[1], side: m[2], d: m[3] ? +m[3] : 0 };
+  }
+  function port(n, side, d) {
+    var x = cx(n.lane), y = n.y, w = n.w, h = n.h;
+    if (n.t === 'dia') {
+      if (side === 't') return [x, y - h / 2];
+      if (side === 'b') return [x, y + h / 2];
+      if (side === 'l') return [x - w / 2, y];
+      return [x + w / 2, y];
+    }
+    if (side === 't') return [x + d, y - h / 2];
+    if (side === 'b') return [x + d, y + h / 2];
+    if (side === 'l') return [x - w / 2, y + d];
+    return [x + w / 2, y + d];
+  }
+  function route(a, sa, b, sb) {
+    var hz = function (s) { return s === 'l' || s === 'r'; };
+    if (hz(sa) && hz(sb)) {
+      if (Math.abs(a[1] - b[1]) < 1) return [a, b];
+      var mx = (a[0] + b[0]) / 2; return [a, [mx, a[1]], [mx, b[1]], b];
+    }
+    if (!hz(sa) && !hz(sb)) {
+      if (Math.abs(a[0] - b[0]) < 1) return [a, b];
+      var my = (a[1] + b[1]) / 2; return [a, [a[0], my], [b[0], my], b];
+    }
+    if (!hz(sa)) return [a, [a[0], b[1]], b];
+    return [a, [b[0], a[1]], b];
+  }
+  function autoLabel(pts) {
+    var best = 0, bi = 0;
+    for (var i = 0; i < pts.length - 1; i++) {
+      var len = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      if (len > best) { best = len; bi = i; }
+    }
+    var p = pts[bi], q = pts[bi + 1];
+    if (Math.abs(p[1] - q[1]) < 1) return [(p[0] + q[0]) / 2, p[1] - 11, 'middle'];
+    return [p[0] + 8, (p[1] + q[1]) / 2, 'start'];
+  }
+  function arrow(p, q) {
+    var ang = Math.atan2(q[1] - p[1], q[0] - p[0]), L = 11, s = 0.42;
+    var a = [q[0] - L * Math.cos(ang - s), q[1] - L * Math.sin(ang - s)];
+    var b = [q[0] - L * Math.cos(ang + s), q[1] - L * Math.sin(ang + s)];
+    return tag(rc.linearPath([a, q, b], O({ strokeWidth: 1.7, roughness: 0.45, bowing: 0 })));
+  }
+  EDGES.forEach(function (spec) {
+    var id = spec[0], A = parseEnd(spec[1]), B = parseEnd(spec[2]), o = spec[3] || {};
+    var pa = port(N[A.id], A.side, A.d), pb = port(N[B.id], B.side, B.d);
+    var pts = o.via ? [pa].concat(o.via, [pb]) : route(pa, A.side, pb, B.side);
+    var g = el('g', { 'class': 'edge', 'data-id': id, 'data-from': A.id, 'data-to': B.id });
+    var lo = { strokeWidth: 1.5, roughness: 0.85, bowing: 0.5 };
+    if (o.dash) lo.strokeLineDash = [7, 6];
+    var line = tag(rc.linearPath(pts, O(lo)));
+    var halo = line.cloneNode(true);
+    halo.querySelectorAll('path').forEach(function (p) { p.setAttribute('class', 'halo'); });
+    g.appendChild(halo);
+    g.appendChild(line);
+    if (!o.noArrow) g.appendChild(arrow(pts[pts.length - 2], pts[pts.length - 1]));
+    if (o.both) g.appendChild(arrow(pts[1], pts[0]));
+    if (o.label) {
+      var lp = o.lp || autoLabel(pts);
+      var lgp = el('g');
+      var bg = el('rect', { 'class': 'lblbg', rx: 4 });
+      lgp.appendChild(bg);
+      var t = txt(lgp, lp[0], lp[1], o.label, 'lbl', lp[2] || 'middle', 15);
+      labelList.push([t, bg]);
+      g.appendChild(lgp);
+    }
+    layers.edges.appendChild(g);
+  });
+
+  /* Shrink any label that outgrows its shape (font fallback safety), then size label backgrounds. */
+  function fitAll() {
+    fitList.forEach(function (item) {
+      var t = item[0], maxW = item[1], bw = 0;
+      t.style.fontSize = '';
+      try { bw = t.getBBox().width; } catch (e) { return; }
+      if (bw > maxW) t.style.fontSize = (parseFloat(getComputedStyle(t).fontSize) * maxW / bw).toFixed(2) + 'px';
+    });
+    labelList.forEach(function (item) {
+      try {
+        var bb = item[0].getBBox();
+        item[1].setAttribute('x', bb.x - 4);
+        item[1].setAttribute('y', bb.y - 1);
+        item[1].setAttribute('width', bb.width + 8);
+        item[1].setAttribute('height', bb.height + 2);
+      } catch (e) { /* not rendered yet */ }
+    });
+  }
+  fitAll();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll);
+
+  /* ---------------- Legend ---------------- */
+  var LEGEND = [
+    ['Step', 'o', function (r) { return [r.rectangle(5, 6, 36, 18, O(HATCH))]; }],
+    ['Decision', 'k', function (r) { return [r.polygon([[23, 2], [43, 15], [23, 28], [3, 15]], O(HATCH))]; }],
+    ['Start or end', 'c', function (r) { return [r.path(pill(4, 7, 38, 17), O(merge(HATCH, { fillStyle: 'cross-hatch', hachureGap: 5 })))]; }],
+    ['Milestone', 'o', function (r) { return [r.rectangle(8, 9, 30, 12, O(HATCH)), r.rectangle(4, 5, 38, 20, O({ strokeWidth: 1.1, roughness: 0.8 }))]; }],
+    ['Timer', 'o', function (r) {
+      return [r.rectangle(12, 8, 30, 17, O(HATCH)), r.circle(12, 9, 15, O({ fill: PAPER, fillStyle: 'solid', strokeWidth: 1.4, roughness: 0.6 })),
+        r.linearPath([[12, 4], [12, 9], [16, 11]], O({ strokeWidth: 1.3, roughness: 0.3 }))];
+    }],
+    ['Note', null, function (r) { return [r.rectangle(6, 5, 34, 21, O({ fill: FILL, fillStyle: 'solid', roughness: 1.2, strokeWidth: 1.1 }))]; }, 'note'],
+    ['Next step or direct call', null, function (r) { return [r.linearPath([[3, 15], [41, 15]], O({ roughness: 0.6 })), arrowOn(r, [3, 15], [42, 15])]; }],
+    ['Event over Kafka, or timer', null, function (r) { return [r.linearPath([[3, 15], [41, 15]], O({ roughness: 0.6, strokeLineDash: [6, 5] })), arrowOn(r, [3, 15], [42, 15])]; }]
+  ];
+  function arrowOn(r, p, q) {
+    var ang = Math.atan2(q[1] - p[1], q[0] - p[0]), L = 9, s = 0.45;
+    return r.linearPath([[q[0] - L * Math.cos(ang - s), q[1] - L * Math.sin(ang - s)], q, [q[0] - L * Math.cos(ang + s), q[1] - L * Math.sin(ang + s)]], O({ strokeWidth: 1.6, roughness: 0.4, bowing: 0 }));
+  }
+  var legend = document.getElementById('legend');
+  LEGEND.forEach(function (item) {
+    var wrap = document.createElement('span');
+    wrap.className = 'legend-item';
+    var s = el('svg', { viewBox: '0 0 46 30', 'class': 'sk', 'aria-hidden': 'true' });
+    var g = el('g', item[3] ? { 'class': item[3] } : {});
+    if (item[1]) g.style.setProperty('--f', 'var(--lane-' + item[1] + ')');
+    s.appendChild(g);
+    item[2](gen(s)).forEach(function (shape) { g.appendChild(tag(shape)); });
+    wrap.appendChild(s);
+    wrap.appendChild(document.createTextNode(item[0]));
+    legend.appendChild(wrap);
+  });
+
+  /* ---------------- Scenario tracing ---------------- */
+  var P1 = ['a1', 'a2', 's1', 'a3', 'a4', 'a5', 'st_rules', 'a6', 'a8', 'a8k', 'a9', 'st_price', 'b1', 'b2', 'b3', 'b3k', 'b4', 'b6', 'b7'];
+  var PAY = ['b6p', 'b8', 'c1', 'c2', 'c3', 'st_hook', 'c4', 'c6', 'c7'];
+  var CONF = ['d1', 'd1n', 'd2', 'd3', 'd5', 'end'];
+  var SCEN = [
+    { id: 'all', label: 'Whole flow', cap: 'Every path at once. Pick a scenario to trace a single journey.' },
+    { id: 'online', label: 'Online payment', cap: 'UPI, card or wallet: the payment is approved in time and the restaurant accepts.', nodes: P1.concat(PAY, ['c8'], CONF), skip: ['cod'] },
+    { id: 'cod', label: 'Cash on delivery', cap: 'No payment step: the order goes straight to the restaurant as PLACED.', nodes: P1.concat(CONF) },
+    { id: 'fail', label: 'Payment declined', cap: 'A declined card or wrong UPI PIN. The order stays unpaid, the customer tries again, and the second attempt goes through.', nodes: P1.concat(PAY, ['c5', 'c8'], CONF), skip: ['cod'] },
+    { id: 'late', label: 'Paid too late', cap: 'The 15-minute timer cancels the order before the money arrives, so the payment is refunded automatically.', nodes: P1.concat(PAY, ['t1', 'c9']), skip: ['cod'] },
+    { id: 'reject', label: 'Restaurant rejects', cap: 'Paid and placed, but the kitchen says no: the order is cancelled and the money refunded.', nodes: P1.concat(PAY, ['c8', 'd1', 'd1n', 'd2', 'd3', 'd4', 'd4e']), skip: ['cod'] }
+  ];
+  var chips = document.getElementById('chips');
+  var caption = document.getElementById('caption');
+  var buttons = {};
+  SCEN.forEach(function (sc) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'scenario-' + sc.id;
+    b.className = 'chip-btn';
+    b.textContent = sc.label;
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', function () { apply(sc.id); });
+    chips.appendChild(b);
+    buttons[sc.id] = b;
+  });
+  function apply(id) {
+    var sc = SCEN.filter(function (s) { return s.id === id; })[0] || SCEN[0];
+    var set = sc.nodes ? new Set(sc.nodes) : null;
+    var skip = sc.skip || [];
+    svg.classList.toggle('tracing', !!set);
+    svg.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('on', !set || set.has(g.getAttribute('data-id'))); });
+    svg.querySelectorAll('.edge').forEach(function (g) {
+      var on = !set || (set.has(g.getAttribute('data-from')) && set.has(g.getAttribute('data-to')) && skip.indexOf(g.getAttribute('data-id')) < 0);
+      g.classList.toggle('on', on);
+    });
+    Object.keys(buttons).forEach(function (k) { buttons[k].setAttribute('aria-pressed', String(k === sc.id)); });
+    caption.textContent = sc.cap;
+    try { localStorage.setItem('booking-flow-scenario', sc.id); } catch (e) { /* storage unavailable */ }
+  }
+  var start = 'all';
+  try { start = localStorage.getItem('booking-flow-scenario') || 'all'; } catch (e) { /* storage unavailable */ }
+  apply(start);
+})();
+</script>
+
+</body></html>
